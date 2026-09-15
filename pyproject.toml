@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fem3d"
+version = "0.1.0"
+description = "A 3D frame and truss finite element analysis library based on the direct stiffness matrix method"
+authors = [{name = "Abinash Mandal", email = "abinashmandal33486@gmail.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "flake8"]
+ecosystem = ["struct_core>=0.2.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fem3d*"]
