@@ -48,3 +48,6 @@ docs/source/api/
 *.jpg
 *.jpeg
 *.svg
+
+references/
+scratch/

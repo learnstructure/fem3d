@@ -17,8 +17,8 @@ class FrameElement(ElementBase):
     The formulation supports:
     - Axial extension / compression (EA)
     - St. Venant torsion (GJ)
-    - Major-axis flexure (E*Iz) and shear
-    - Minor-axis flexure (E*Iy) and shear
+    - Flexure in local x'-y' plane about local z'-axis (E*Iz) and shear
+    - Flexure in local x'-z' plane about local y'-axis (E*Iy) and shear
     - Consistent and lumped mass matrices
     - 3D geometric stiffness matrix (Kg) for linear elastic buckling analysis
     - Optional end releases (hinges)
@@ -41,15 +41,25 @@ class FrameElement(ElementBase):
     - McGuire, W., Gallagher, R. H., & Ziemian, R. D. (2000). Matrix Structural Analysis
       (2nd ed.). John Wiley & Sons, Section 5.1, pp. 115-120.
 
-    Sign Convention:
+    Sign Convention & Local Axes:
+    -----------------------------
     - Local x' is along the member centroidal axis from node_i to node_j.
-    - Local y' and z' are the principal cross-section axes.
-    - Right-hand rule applies to rotations and moments.
-    - For bending in x'-y' plane (deflection u_y, rotation theta_z about z'):
-        curvature = d^2(u_y)/dx^2, slope = d(u_y)/dx = +theta_z.
-    - For bending in x'-z' plane (deflection u_z, rotation theta_y about y'):
-        curvature = d^2(u_z)/dx^2, slope = d(u_z)/dx = -theta_y.
-        Hence cross-terms involving theta_y have opposite sign relative to theta_z.
+    - Local y' and z' form a right-handed orthogonal triad with x' (x' × y' = z').
+    - Right-hand rule applies to rotations, moments, and roll angle.
+    - **Iz block (bending in local x'-y' plane)**:
+        Deflection is u_y (along local y'), rotation is theta_z (about local z').
+        Resisted by Iz = ∫ y'^2 dA.
+        Curvature = d^2(u_y)/dx^2, slope = d(u_y)/dx = +theta_z.
+    - **Iy block (bending in local x'-z' plane)**:
+        Deflection is u_z (along local z'), rotation is theta_y (about local y').
+        Resisted by Iy = ∫ z'^2 dA.
+        Curvature = d^2(u_z)/dx^2, slope = d(u_z)/dx = -theta_y.
+        (Note the negative sign: by right-hand rule about local y', a positive rotation
+        theta_y causes displacement in the negative z' direction).
+    - **Moments of Inertia Note**:
+        Neither Iz nor Iy is generically labeled "strong" or "weak". Whether Iz or Iy
+        provides greater flexural rigidity depends on the cross-section geometry and
+        how the member is oriented (roll angle) in 3D space.
     """
 
     def __init__(
@@ -82,9 +92,11 @@ class FrameElement(ElementBase):
         section : Section or float
             Section definition or numeric cross-sectional area A.
         roll_angle : float, optional
-            Orientation roll angle in degrees about local x'-axis. Defaults to 0.0.
+            Member roll angle in degrees about local x'-axis (vx).
+            Rotates the local (y', z') axes. Defaults to 0.0.
         web_vector : numpy.ndarray, optional
-            Reference orientation vector. Defaults to None.
+            Reference orientation vector pointing in the local x'-y' plane (e.g. web direction).
+            If provided, overrides default orientation. Defaults to None.
         extra_mass : float, optional
             Additional distributed non-structural mass per unit length. Defaults to 0.0.
         releases_i : list of bool, optional

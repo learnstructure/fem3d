@@ -18,6 +18,12 @@ from .loads import PointLoad, DistributedLoad, ElementPointLoad
 from .results import Results
 from .buckling_analysis import buckling_analysis
 from .utils.simple_frame import SimpleFrame, SimpleFrame3D
+from .visualization import (
+    DrawStructure,
+    draw_structure,
+    plot_mode_shape,
+    plot_buckling_mode,
+)
 
 try:
     from .adapters.struct_core_adapter import (
@@ -50,6 +56,10 @@ __all__ = [
     "buckling_analysis",
     "SimpleFrame",
     "SimpleFrame3D",
+    "DrawStructure",
+    "draw_structure",
+    "plot_mode_shape",
+    "plot_buckling_mode",
     "model_from_core",
     "model_to_core",
     "result_to_core",

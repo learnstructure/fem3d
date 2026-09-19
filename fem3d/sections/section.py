@@ -10,16 +10,33 @@ class Section:
     """
     Represents a cross-section of a 3D structural element.
 
+    Moments of Inertia & Local Axes Convention
+    -------------------------------------------
+    - Local x'-axis is directed along the member centroidal axis (from node i to node j).
+    - Local y'-axis and z'-axis lie in the cross-section plane forming a right-handed
+      orthogonal system (x' × y' = z').
+    - Iy is the second moment of area about the local y'-axis:
+          Iy = ∫ z'^2 dA
+      It resists flexure in the local x'-z' plane (transverse displacement u_z, rotation theta_y).
+    - Iz is the second moment of area about the local z'-axis:
+          Iz = ∫ y'^2 dA
+      It resists flexure in the local x'-y' plane (transverse displacement u_y, rotation theta_z).
+
+    Note:
+    Neither Iy nor Iz is inherently the "strong" or "weak" axis. Which axis has
+    higher bending stiffness depends entirely on the cross-section geometry and its
+    orientation (roll angle) in 3D space.
+
     Attributes
     ----------
     A : float
         Cross-sectional area.
     Iy : float
-        Second moment of area about the local y'-axis (weak or minor axis).
+        Second moment of area about the local y'-axis (resists bending in local x'-z' plane).
     Iz : float
-        Second moment of area about the local z'-axis (strong or major axis).
+        Second moment of area about the local z'-axis (resists bending in local x'-y' plane).
     J : float
-        St. Venant torsional constant.
+        St. Venant torsional constant about the local x'-axis.
     Asy : float, optional
         Effective shear area in the local y'-direction.
     Asz : float, optional
@@ -43,15 +60,15 @@ class Section:
         A : float
             Cross-sectional area.
         Iy : float, optional
-            Second moment of area about local y'-axis. Defaults to 0.0.
+            Second moment of area about local y'-axis (resists bending in local x'-z' plane). Defaults to 0.0.
         Iz : float, optional
-            Second moment of area about local z'-axis. Defaults to 0.0.
+            Second moment of area about local z'-axis (resists bending in local x'-y' plane). Defaults to 0.0.
         J : float, optional
-            Torsional constant. Defaults to 0.0.
+            Torsional constant about local x'-axis. Defaults to 0.0.
         Asy : float, optional
-            Shear area along local y'. Defaults to None.
+            Effective shear area along local y'. Defaults to None.
         Asz : float, optional
-            Shear area along local z'. Defaults to None.
+            Effective shear area along local z'. Defaults to None.
         """
         self.A = float(A)
         self.Iy = float(Iy)
@@ -62,7 +79,7 @@ class Section:
 
     @property
     def I(self) -> float:
-        """Alias for strong-axis moment of inertia Iz (2D compatibility)."""
+        """Alias for moment of inertia Iz about local z'-axis (for 2D in-plane bending compatibility)."""
         return self.Iz
 
     @classmethod
@@ -70,15 +87,18 @@ class Section:
         """
         Create a rectangular cross-section.
 
-        Local coordinates: width along local y', depth along local z'.
-        Iz is strong axis (about z'), Iy is weak axis (about y').
+        Local coordinates convention:
+        - `depth` (h) is the dimension along the local y'-axis.
+        - `width` (b) is the dimension along the local z'-axis.
+        - Iz = (width * depth^3) / 12 resists flexure in the local x'-y' plane (about z'-axis).
+        - Iy = (depth * width^3) / 12 resists flexure in the local x'-z' plane (about y'-axis).
 
         Parameters
         ----------
         width : float
-            Dimension along local y' (b).
+            Cross-section dimension along local z' (b).
         depth : float
-            Dimension along local z' (h).
+            Cross-section dimension along local y' (h).
         """
         b = float(width)
         h = float(depth)
@@ -148,14 +168,20 @@ class Section:
         """
         Create a hollow rectangular box / structural tube (HSS) cross-section.
 
+        Local coordinates convention:
+        - `depth` (h) is the outer dimension along the local y'-axis.
+        - `width` (b) is the outer dimension along the local z'-axis.
+        - Iz = (width * depth^3 - b_i * h_i^3) / 12 resists flexure in local x'-y' plane (about z'-axis).
+        - Iy = (depth * width^3 - h_i * b_i^3) / 12 resists flexure in local x'-z' plane (about y'-axis).
+
         Parameters
         ----------
         width : float
-            Outer dimension along local y'.
+            Outer dimension along local z' (b).
         depth : float
-            Outer dimension along local z'.
+            Outer dimension along local y' (h).
         thickness : float
-            Wall thickness.
+            Wall thickness (t).
         """
         b = float(width)
         h = float(depth)
@@ -184,12 +210,18 @@ class Section:
         """
         Create an I-beam / W-shape cross-section.
 
+        Local coordinates convention:
+        - `d` is the total depth along the local y'-axis (parallel to the web).
+        - `bf` is the flange width along the local z'-axis.
+        - Iz resists flexure in the web plane x'-y' (bending about local z'-axis).
+        - Iy resists flexure across the web plane x'-z' (bending about local y'-axis).
+
         Parameters
         ----------
         d : float
-            Total depth of the section along local z'.
+            Total depth of the section along local y' (parallel to web).
         bf : float
-            Flange width along local y'.
+            Flange width along local z'.
         tf : float
             Flange thickness.
         tw : float
@@ -202,14 +234,14 @@ class Section:
         hw = d - 2.0 * tf
 
         A = 2.0 * bf * tf + hw * tw
-        # Major axis bending Iz (about local z')
+        # Bending in web plane x'-y' about local z'-axis
         Iz = (bf * d**3 - (bf - tw) * hw**3) / 12.0
-        # Minor axis bending Iy (about local y')
+        # Bending across web plane x'-z' about local y'-axis
         Iy = 2.0 * (tf * bf**3) / 12.0 + (hw * tw**3) / 12.0
         # Torsion constant J for open thin-walled shape: J = sum(1/3 * b_i * t_i^3)
         J = (2.0 * bf * tf**3 + hw * tw**3) / 3.0
-        Asy = 2.0 * bf * tf * (5.0 / 6.0)
-        Asz = d * tw
+        Asy = d * tw
+        Asz = 2.0 * bf * tf * (5.0 / 6.0)
 
         return cls(A=A, Iy=Iy, Iz=Iz, J=J, Asy=Asy, Asz=Asz)
 

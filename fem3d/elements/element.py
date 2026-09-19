@@ -14,8 +14,68 @@ class ElementBase:
     Handles 3D geometry calculation, element orientation vectors, and
     the 12x12 coordinate transformation matrix between local and global systems.
 
-    Coordinate Transformation Theory
-    --------------------------------
+    Coordinate Systems & Local Triad Definition
+    -------------------------------------------
+    `fem3d` uses a right-handed Cartesian global system (X, Y, Z) with **+Z vertical upward**.
+    Each 3D element establishes a right-handed orthogonal local coordinate triad (vx, vy, vz):
+      - **vx (local x'-axis)**: Directed along the member centroidal axis from node_i to node_j:
+            vx = (node_j - node_i) / L = [lx, mx, nx]
+      - **vy (local y'-axis)**: First cross-sectional axis. Associated with bending moment Iz
+        and displacement u_y.
+      - **vz (local z'-axis)**: Second cross-sectional axis. Associated with bending moment Iy
+        and displacement u_z.
+      - Orthogonality and right-hand rule:
+            vx · vy = 0,   vx · vz = 0,   vy · vz = 0
+            vx × vy = vz,  vy × vz = vx,  vz × vx = vy
+
+    Default Unrolled Local Axes (roll_angle = 0.0, web_vector = None):
+    ------------------------------------------------------------------
+    1. **Non-vertical members** (axis not parallel to global Z, sqrt(lx^2 + mx^2) > 0):
+       - vz is chosen to lie in the horizontal global XY plane (perpendicular to vx and global Z):
+             vz = (vx × [0, 0, 1]) / ||vx × [0, 0, 1]|| = [vx_y, -vx_x, 0] / sqrt(vx_x^2 + vx_y^2)
+       - vy is chosen perpendicular to vz and vx (lying in the vertical plane containing the member,
+         pointing generally upward):
+             vy = vz × vx
+       *Example*: For a beam along global +X (vx = [1, 0, 0]):
+         vz = [0, -1, 0] (horizontal, along -Y)
+         vy = [0, 0, 1]  (vertical, along +Z)
+
+    2. **Vertical members** (axis parallel to global Z, sqrt(lx^2 + mx^2) == 0):
+       - If pointing upward along +Z (nx > 0):
+             vy = [0, 1, 0]   (along global +Y)
+             vz = [-1, 0, 0]  (along global -X)
+       - If pointing downward along -Z (nx < 0):
+             vy = [0, -1, 0]  (along global -Y)
+             vz = [-1, 0, 0]  (along global -X)
+
+    User-Specified Orientation:
+    ---------------------------
+    - **roll_angle** (beta in degrees):
+      Rotates the default (vy, vz) triad about the longitudinal axis vx by angle beta:
+          vy_rot =  cos(beta) * vy + sin(beta) * vz
+          vz_rot = -sin(beta) * vy + cos(beta) * vz
+      Positive beta rotates from vy toward vz (right-hand screw rule along vx).
+    - **web_vector** (v_ref):
+      An explicit 3D reference vector lying in the member's local x'-y' plane
+      (e.g., pointing along the web of an I-beam or depth of a beam):
+          vz = (vx × v_ref) / ||vx × v_ref||
+          vy = vz × vx
+
+    Coordinate Transformation:
+    --------------------------
+    The 3x3 direction cosine rotation matrix R maps global vectors to local vectors:
+        R = [ vx^T ]
+            [ vy^T ]
+            [ vz^T ]
+        v_local = R @ v_global
+        v_global = R.T @ v_local
+
+    The 12x12 global-to-local transformation matrix T is block-diagonal:
+        T = diag(R, R, R, R)
+        u_local = T @ u_global
+        F_global = T.T @ F_local
+        K_global = T.T @ K_local @ T
+
     References:
     - Weaver, W., & Gere, J. M. (1990). Matrix Analysis of Framed Structures (3rd ed.).
       Van Nostrand Reinhold, Section 4.10, pp. 240-244.
@@ -23,35 +83,6 @@ class ElementBase:
       (2nd ed.). John Wiley & Sons, Section 5.1.
     - Przemieniecki, J. S. (1968). Theory of Matrix Structural Analysis.
       McGraw-Hill, Section 4.5.
-
-    Let the element span from node i (xi, yi, zi) to node j (xj, yj, zj).
-    The local x'-axis is directed along the member centroidal axis:
-        vx = (node_j - node_i) / L = [lx, mx, nx]
-    
-    The local principal y' and z' axes form a right-handed orthogonal triad:
-        vx . vy = 0,   vx . vz = 0,   vy . vz = 0
-        vx x vy = vz
-
-    By default, global Z is considered the vertical axis (standard civil/structural convention).
-    - For non-vertical members (not parallel to global Z):
-        vz = (vx x [0, 0, 1]) / ||vx x [0, 0, 1]||
-        vy = vz x vx
-    - For vertical members parallel to global Z (lx = 0, mx = 0):
-        If nx > 0 (pointing +Z):
-            vy = [0, 1, 0], vz = [-1, 0, 0]
-        If nx < 0 (pointing -Z):
-            vy = [0, -1, 0], vz = [-1, 0, 0]
-    
-    If an explicit roll angle beta (in degrees or radians) or web_vector is supplied,
-    the triad is rotated about vx accordingly.
-
-    The 3x3 direction cosine rotation matrix R is:
-        R = [ vx^T ]
-            [ vy^T ]
-            [ vz^T ]
-    
-    The 12x12 global-to-local transformation matrix T is block-diagonal:
-        T = diag(R, R, R, R)
     """
 
     def __init__(
@@ -74,9 +105,11 @@ class ElementBase:
         node_j : Node
             End node.
         roll_angle : float, optional
-            Member roll/web angle in degrees about local x'-axis. Defaults to 0.0.
+            Member roll angle in degrees about local x'-axis (vx).
+            Rotates the local (y', z') axes. Defaults to 0.0.
         web_vector : numpy.ndarray, optional
-            Reference orientation vector pointing toward local y' or z' axis.
+            Reference orientation vector pointing in the local x'-y' plane (e.g. web direction).
+            If provided, overrides default orientation. Defaults to None.
         """
         self.id = eid
         self.node_i = node_i
@@ -160,6 +193,11 @@ class ElementBase:
     def rotation_matrix_3x3(self) -> np.ndarray:
         """Return the 3x3 direction cosine rotation matrix."""
         return self.R.copy()
+
+    @property
+    def rotation_matrix(self) -> np.ndarray:
+        """Alias for rotation_matrix_3x3()."""
+        return self.rotation_matrix_3x3()
 
     def transformation_matrix(self, dof_per_node: int = 6) -> np.ndarray:
         """

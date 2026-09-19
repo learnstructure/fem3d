@@ -96,8 +96,8 @@ class Node:
         if isinstance(ux_fixed, (list, tuple)):
             flags = list(ux_fixed)
             if len(flags) == 3:
-                # If 3 flags are passed (e.g. 2D legacy style), map to [ux, uy, uz=0, rx=0, ry=0, rz]
-                flags = [flags[0], flags[1], False, False, False, flags[2]]
+                # In 3D, 3 flags represent the three translational DOFs [ux, uy, uz] (e.g. 3D pin/ball joint)
+                flags = [flags[0], flags[1], flags[2], False, False, False]
             elif len(flags) != 6:
                 raise ValueError(
                     f"Support fixity list must have 6 elements [ux, uy, uz, rx, ry, rz], got {len(flags)}."

@@ -19,6 +19,20 @@ class SimpleFrame:
     """
     High-level fluent wrapper for constructing, solving, and evaluating 3D finite element structures.
 
+    Coordinate System & Orientation Overview
+    -----------------------------------------
+    - **Global system (X, Y, Z)**: Right-handed Cartesian triad where **+Z is vertical upward**.
+    - **Local axes (x', y', z')**:
+      - x' (vx): Centroidal axis directed from node_i to node_j.
+      - y' (vy): Cross-sectional axis. Resists bending in local x'-y' plane via Iz = ∫ y'^2 dA.
+      - z' (vz): Cross-sectional axis. Resists bending in local x'-z' plane via Iy = ∫ z'^2 dA.
+      - By default (roll_angle=0, web_vector=None):
+        - For horizontal/sloped members: vz is in the global XY horizontal plane,
+          and vy is in the vertical plane containing the member (pointing upward).
+        - For vertical members along +Z: vy points along global +Y, vz points along global -X.
+      - `roll_angle` (degrees): Rotates (vy, vz) about vx following right-hand rule.
+      - `web_vector`: Directs the local x'-y' plane toward a specific 3D direction (e.g. web plane).
+
     Attributes
     ----------
     structure : Structure
@@ -83,29 +97,33 @@ class SimpleFrame:
         id : int or str
             Unique element identifier.
         node_i_id : int or str
-            Start node identifier.
+            Start node identifier (node i).
         node_j_id : int or str
-            End node identifier.
+            End node identifier (node j).
         E : float
             Young's modulus.
         A : float
             Cross-sectional area.
         Iy : float, optional
-            Weak-axis moment of inertia. If omitted and Iz is given, set equal to Iz.
+            Second moment of area about local y'-axis (resists bending in local x'-z' plane).
+            If omitted and Iz is given, set equal to Iz.
         Iz : float, optional
-            Strong-axis moment of inertia. If omitted and Iy is given, set equal to Iy.
+            Second moment of area about local z'-axis (resists bending in local x'-y' plane).
+            If omitted and Iy is given, set equal to Iy.
         J : float, optional
-            Torsional constant. If omitted, approximated as Iy + Iz.
+            St. Venant torsional constant about local x'-axis. If omitted, approximated as Iy + Iz.
         roll_angle : float, optional
-            Roll angle in degrees about element axis. Defaults to 0.0.
+            Member roll angle in degrees about local x'-axis (vx).
+            Rotates the local (y', z') axes. Defaults to 0.0.
         web_vector : iterable, optional
-            Reference orientation vector. Defaults to None.
+            Reference orientation vector pointing in the local x'-y' plane (e.g. web direction).
+            If provided, overrides default orientation. Defaults to None.
         nu : float, optional
             Poisson's ratio. Defaults to 0.3.
         G : float, optional
             Shear modulus. If None, derived as E / (2*(1+nu)).
         extra_mass : float, optional
-            Distributed non-structural mass. Defaults to 0.0.
+            Distributed non-structural mass per unit length. Defaults to 0.0.
 
         Returns
         -------
@@ -326,6 +344,33 @@ class SimpleFrame:
         """Solve the linear structural system."""
         return self.structure.solve()
 
+    def draw(self, **kwargs):
+        """
+        Draw the 3D structure using DrawStructure.
+
+        See DrawStructure.draw for detailed parameters.
+        """
+        from ..visualization import DrawStructure
+        drawer = DrawStructure(self.structure)
+        return drawer.draw(**kwargs)
+
+    def plot_mode_shape(self, mode: int = 1, **kwargs):
+        """
+        Plot a 3D vibration mode shape.
+        """
+        from ..visualization import DrawStructure
+        drawer = DrawStructure(self.structure)
+        return drawer.draw_mode_shape(mode=mode, **kwargs)
+
+    def plot_buckling_mode(self, mode: int = 1, **kwargs):
+        """
+        Plot a 3D elastic buckling mode shape.
+        """
+        from ..visualization import DrawStructure
+        drawer = DrawStructure(self.structure)
+        return drawer.draw_buckling_mode(mode=mode, **kwargs)
+
 
 # Convenient alias
 SimpleFrame3D = SimpleFrame
+

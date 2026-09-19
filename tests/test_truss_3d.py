@@ -73,3 +73,53 @@ def test_truss_auto_fix_unstable_rotations():
     # If this succeeds without a LinAlgError singular matrix, auto-fix worked!
     assert frame.structure.disp is not None
     assert frame.structure.disp[frame.structure.nodes[2].dofs[0]] > 0.0
+
+
+def test_kassimali_example_8_1_space_truss():
+    """
+    Example 8.1 from Kassimali A. (2022), Matrix Analysis of Structures.
+    Tests nodal displacements at the apex (node 5) and reaction equilibrium.
+    Units: kN, m.
+    """
+    frame = SimpleFrame()
+
+    # Nodes
+    frame.add_node(1, -1.5, 0.0, 2.0)
+    frame.add_node(2, 3.0, 0.0, 2.0)
+    frame.add_node(3, 1.5, 0.0, -2.0)
+    frame.add_node(4, -3.0, 0.0, -2.0)
+    frame.add_node(5, 0.0, 6.0, 0.0)
+
+    E = 70e6     # kN/m^2
+    A = 3700e-6  # m^2
+
+    # 3D truss elements
+    frame.add_truss(1, 1, 5, E, A)
+    frame.add_truss(2, 2, 5, E, A)
+    frame.add_truss(3, 3, 5, E, A)
+    frame.add_truss(4, 4, 5, E, A)
+
+    # Pin supports at base [ux, uy, uz]
+    frame.add_support(1, [1, 1, 1])
+    frame.add_support(2, [1, 1, 1])
+    frame.add_support(3, [1, 1, 1])
+    frame.add_support(4, [1, 1, 1])
+
+    # Concentrated 3D loads at apex [Fx, Fy, Fz, Mx, My, Mz]
+    frame.add_node_load(5, [0.0, -400.0, -200.0, 0.0, 0.0, 0.0])
+
+    disp, reac = frame.solve()
+    results = Results(frame)
+
+    # Verify Node 5 displacements: ux=0.002949, uy=-0.003271, uz=-0.01546
+    node_disp = results.node_displacements().set_index("node").loc[5]
+    assert pytest.approx(node_disp["ux"], abs=1e-5) == 0.002949
+    assert pytest.approx(node_disp["uy"], abs=1e-5) == -0.003271
+    assert pytest.approx(node_disp["uz"], abs=1e-5) == -0.015460
+
+    # Verify equilibrium of reactions
+    r_sum = results.reactions()[["Fx", "Fy", "Fz"]].sum()
+    assert pytest.approx(r_sum["Fx"], abs=1e-3) == 0.0
+    assert pytest.approx(r_sum["Fy"], abs=1e-3) == 400.0
+    assert pytest.approx(r_sum["Fz"], abs=1e-3) == 200.0
+

@@ -59,22 +59,54 @@ pip install -e .
 
 ### Global Coordinate System
 
-`fem3d` uses a standard **right-handed Cartesian** global coordinate system:
+`fem3d` uses a standard **right-handed Cartesian** global coordinate system $(X, Y, Z)$ satisfying $\vec{X} \times \vec{Y} = \vec{Z}$:
 
+```text
+         Z (vertical / upward)
+         ^
+         |    Y (horizontal / transverse / depth)
+         |   /
+         |  /
+         | /
+         +----------------> X (horizontal / longitudinal / span)
 ```
-         Z (up)
-         |
-         |
-         +-------> Y
-        /
-       X
-```
 
-- **X** — horizontal, positive to the right (or along the primary frame span)
-- **Y** — horizontal, positive out-of-plane
-- **Z** — vertical, positive upward
+- **X (Global X)** — horizontal axis, positive to the right (primary frame span or length).
+- **Y (Global Y)** — horizontal axis, positive along the transverse / depth direction (into the plane).
+- **Z (Global Z)** — vertical axis, positive upward (column height / elevation).
 
-> **Note:** Global Z is treated as the vertical axis by default. This affects how automatic local axes are computed for non-vertical members (see [Local Axes](#local-axes--orientation)).
+#### Standard Orthographic Views
+
+- **Plan View** (looking down from $+Z$ toward ground):
+  - **X** points to the right (East / longitudinal span)
+  - **Y** points upward on the page (North / transverse depth)
+  - **Z** points out of the page toward the viewer (Up)
+
+  ```text
+       Y (transverse / North)
+       ^
+       |
+       |
+       +--------------> X (longitudinal / East)
+      (.) Z (out of page / Up)
+  ```
+
+- **Elevation View** (looking along $+Y$ toward the structural face):
+  - **X** points to the right (span)
+  - **Z** points upward (height)
+  - **Y** points into the page (away from viewer)
+
+  ```text
+       Z (height / elevation)
+       ^
+       |
+       |
+       +--------------> X (longitudinal / span)
+       x  Y (into page / depth)
+  ```
+
+> **Note on Vertical Axis:** Global **Z** is treated as the vertical upward axis by default. All automatic local orientation routines treat $+Z$ as the vertical reference direction, and gravity load acts in the $-Z$ direction.
+
 
 ### Forces and Moments
 
@@ -134,9 +166,9 @@ For each element, the local coordinate triad $(\vec{v}_{x'}, \vec{v}_{y'}, \vec{
 - **$\vec{v}_{x'}$** — directed along the member centroidal axis from node $i$ to node $j$:
   $$\vec{v}_{x'} = \frac{1}{L}(x_j - x_i,\; y_j - y_i,\; z_j - z_i)^T$$
 
-- **$\vec{v}_{y'}$** — the section's principal axis in the **web plane** (for columns: horizontal; for beams: the "minor bending" axis).
+- **$\vec{v}_{y'}$** — cross-section axis in the local triad. Associated with bending in the local $x'$-$y'$ plane (governed by $I_z$, deflection $u_y$, rotation $\theta_z$).
 
-- **$\vec{v}_{z'}$** — the third axis such that $\vec{v}_{z'} = \vec{v}_{x'} \times \vec{v}_{y'}$.
+- **$\vec{v}_{z'}$** — cross-section axis such that $\vec{v}_{z'} = \vec{v}_{x'} \times \vec{v}_{y'}$. Associated with bending in the local $x'$-$z'$ plane (governed by $I_y$, deflection $u_z$, rotation $\theta_y$).
 
 ### Default Automatic Orientation
 
@@ -433,9 +465,11 @@ results.create_report()
 | `Section.from_tube(width, depth, thickness)` | Hollow rectangle (HSS) | $b$, $h$, $t$ |
 | `Section.from_i_shape(bf, tf, d, tw)` | I-beam / W-shape | flange & web dims |
 
-**Axes convention:**
-- $I_y$ = moment of inertia about the local **y'-axis** (weak/minor axis for typical I-beams)
-- $I_z$ = moment of inertia about the local **z'-axis** (strong/major axis for typical I-beams)
+**Moments of Inertia Convention:**
+- $I_y$ = second moment of area about the local **y'-axis** ($I_y = \int z'^2 dA$), resisting flexure in the local $x'$-$z'$ plane.
+- $I_z$ = second moment of area about the local **z'-axis** ($I_z = \int y'^2 dA$), resisting flexure in the local $x'$-$y'$ plane.
+
+*Note:* Neither $I_y$ nor $I_z$ is labeled generically as "strong" or "weak"; which axis provides higher flexural stiffness depends on the cross-section dimensions and orientation (roll angle).
 
 ---
 
@@ -644,6 +678,42 @@ frame.solve()
 freqs, modes = frame.structure.modal_analysis(num_modes=4)
 print("Natural frequencies (Hz):", freqs)
 ```
+
+### 3D Structure Visualization (`DrawStructure`)
+
+`fem3d` includes a publication-quality 3D visualization module powered by Matplotlib 3D:
+
+```python
+from fem3d import SimpleFrame, DrawStructure, draw_structure
+
+frame = SimpleFrame()
+# ... build geometry and solve ...
+frame.solve()
+
+# 1. Direct interactive 3D plot
+frame.draw(
+    show_undeformed=True,
+    show_deformed=True,
+    show_loads=True,
+    show_supports=True,
+    color_by_force=True,     # Tension in blue, compression in red
+    title="3D Space Structure",
+    save_path="structure_3d.png",
+)
+
+# 2. Vibration mode shape plot
+frame.plot_mode_shape(mode=1, title="Fundamental Vibration Mode")
+
+# 3. Linear elastic buckling mode plot
+frame.plot_buckling_mode(mode=1, title="First Buckling Mode")
+```
+
+**Key Visualization Features:**
+- **Realistic 3D Supports:** Fixed anchor pads with ground stubs, 3D pinned pyramids, and roller bearings.
+- **Double-Headed Moment Arrows:** 3D moments drawn with double arrowheads along the moment vector axis.
+- **Cubic Hermite Splines:** 3D deformed beam curves showing real member bending curvature in space.
+- **Axial Force Colormap:** Elements color-coded with a synchronized colorbar (blue = tension, red = compression).
+
 
 ---
 
