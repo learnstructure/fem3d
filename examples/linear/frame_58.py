@@ -14,15 +14,15 @@ frame.add_node(4, 2.5, 0, -2.5)
 # Material & Section properties
 E = 200e6
 A = 6.25e-3
-Iy = 40e-6
-Iz = 40e-6
+I2 = 40e-6
+I3 = 40e-6
 G = 60e6
 J = 20e-6
 
 # Add 3D frame elements
-frame.add_frame(1, 2, 1, E, A, Iy, Iz, G=G, J=J)
-frame.add_frame(2, 3, 1, E, A, Iy, Iz, G=G, J=J)
-frame.add_frame(3, 4, 1, E, A, Iy, Iz, G=G, J=J)
+frame.add_frame(1, 2, 1, E, A, I2=I2, I3=I3, G=G, J=J)
+frame.add_frame(2, 3, 1, E, A, I2=I2, I3=I3, G=G, J=J)
+frame.add_frame(3, 4, 1, E, A, I2=I2, I3=I3, G=G, J=J)
 
 # Fixed supports at 2, 3, 4
 frame.add_support(2, [1, 1, 1, 1, 1, 1])
@@ -40,7 +40,7 @@ print("\nNode Displacements:")
 print(results.node_displacements())
 print("\nReactions:")
 print(results.reactions())
-print("\nElement Bar Forces (local fx_i is tension if negative):")
+print("\nElement Bar Forces (local f1_i is tension if negative):")
 print(results.element_forces())
 
 # Check equilibrium of reactions vs applied load

@@ -2,7 +2,7 @@
 Loads module defining 3D point, distributed, and element loads.
 """
 
-from typing import Union
+from typing import Union, Optional
 import numpy as np
 
 
@@ -92,6 +92,8 @@ class ElementLoad:
 class DistributedLoad(ElementLoad):
     """
     Uniformly distributed load acting on an element.
+    - In local coordinates: w1 (axial), w2 (transverse, web), w3 (transverse, flange)
+    - In global coordinates: wx, wy, wz along global X, Y, Z
 
     References:
     - Przemieniecki, J. S. (1968). Theory of Matrix Structural Analysis.
@@ -103,10 +105,13 @@ class DistributedLoad(ElementLoad):
     def __init__(
         self,
         element,
-        wx: float = 0.0,
-        wy: float = 0.0,
-        wz: float = 0.0,
+        w1: float = 0.0,
+        w2: float = 0.0,
+        w3: float = 0.0,
         coord_system: str = "local",
+        wx: Optional[float] = None,
+        wy: Optional[float] = None,
+        wz: Optional[float] = None,
     ):
         """
         Initialize a DistributedLoad.
@@ -115,12 +120,12 @@ class DistributedLoad(ElementLoad):
         ----------
         element : ElementBase
             The element on which the load acts.
-        wx : float, optional
-            Distributed load intensity along x-axis (axial). Defaults to 0.0.
-        wy : float, optional
-            Distributed load intensity along y-axis. Defaults to 0.0.
-        wz : float, optional
-            Distributed load intensity along z-axis. Defaults to 0.0.
+        w1 : float, optional
+            Distributed load intensity along local 1-axis (axial). Defaults to 0.0.
+        w2 : float, optional
+            Distributed load intensity along local 2-axis (transverse). Defaults to 0.0.
+        w3 : float, optional
+            Distributed load intensity along local 3-axis (transverse). Defaults to 0.0.
         coord_system : str, optional
             'local' or 'global'. Defaults to 'local'.
         """
@@ -128,14 +133,17 @@ class DistributedLoad(ElementLoad):
         self.coord_system = coord_system.lower()
 
         if self.coord_system == "global":
-            # Transform global distributed load vector [wx, wy, wz] to local coordinates
+            # Global loads passed via wx, wy, wz or w1, w2, w3
+            gx = wx if wx is not None else w1
+            gy = wy if wy is not None else w2
+            gz = wz if wz is not None else w3
             R = element.rotation_matrix_3x3()
-            w_loc = R @ np.array([wx, wy, wz], dtype=float)
-            self.wx, self.wy, self.wz = float(w_loc[0]), float(w_loc[1]), float(w_loc[2])
+            w_loc = R @ np.array([gx, gy, gz], dtype=float)
+            self.w1, self.w2, self.w3 = float(w_loc[0]), float(w_loc[1]), float(w_loc[2])
         else:
-            self.wx = float(wx)
-            self.wy = float(wy)
-            self.wz = float(wz)
+            self.w1 = float(wx if wx is not None else w1)
+            self.w2 = float(wy if wy is not None else w2)
+            self.w3 = float(wz if wz is not None else w3)
 
         eq_local = self._compute_equivalent_loads()
         self._transform_and_store_equivalent_loads(eq_local)
@@ -145,34 +153,34 @@ class DistributedLoad(ElementLoad):
         Compute work-equivalent nodal forces and moments in local coordinates.
 
         For uniform load:
-        - Axial wx:
-            f_x1 = wx * L / 2,  f_x2 = wx * L / 2
-        - Transverse wy (bending about z'):
-            f_y1 = wy * L / 2,  f_y2 = wy * L / 2
-            m_z1 = wy * L^2 / 12,  m_z2 = -wy * L^2 / 12
-        - Transverse wz (bending about y'):
-            f_z1 = wz * L / 2,  f_z2 = wz * L / 2
-            m_y1 = -wz * L^2 / 12,  m_y2 = wz * L^2 / 12
+        - Axial w1:
+            f_1i = w1 * L / 2,  f_1j = w1 * L / 2
+        - Transverse w2 (bending in 1-2 about axis 3):
+            f_2i = w2 * L / 2,  f_2j = w2 * L / 2
+            m_3i = w2 * L^2 / 12,  m_3j = -w2 * L^2 / 12
+        - Transverse w3 (bending in 1-3 about axis 2):
+            f_3i = w3 * L / 2,  f_3j = w3 * L / 2
+            m_2i = -w3 * L^2 / 12,  m_2j = w3 * L^2 / 12
         """
         L = self.element.length
         eq = np.zeros(12, dtype=float)
 
-        # Axial
-        eq[0] = self.wx * L / 2.0
-        eq[6] = self.wx * L / 2.0
+        # Axial (local axis 1)
+        eq[0] = self.w1 * L / 2.0
+        eq[6] = self.w1 * L / 2.0
 
-        # Flexure in x-y (Iz)
-        eq[1] = self.wy * L / 2.0
-        eq[5] = self.wy * (L**2) / 12.0
-        eq[7] = self.wy * L / 2.0
-        eq[11] = -self.wy * (L**2) / 12.0
+        # Flexure in 1-2 about axis 3 (resisted by I3)
+        eq[1] = self.w2 * L / 2.0
+        eq[5] = self.w2 * (L**2) / 12.0
+        eq[7] = self.w2 * L / 2.0
+        eq[11] = -self.w2 * (L**2) / 12.0
 
-        # Flexure in x-z (Iy)
-        # Note sign convention: positive theta_y is slope -du_z/dx
-        eq[2] = self.wz * L / 2.0
-        eq[4] = -self.wz * (L**2) / 12.0
-        eq[8] = self.wz * L / 2.0
-        eq[10] = self.wz * (L**2) / 12.0
+        # Flexure in 1-3 about axis 2 (resisted by I2)
+        # Note sign convention: positive theta_2 is slope -du_3/dx1
+        eq[2] = self.w3 * L / 2.0
+        eq[4] = -self.w3 * (L**2) / 12.0
+        eq[8] = self.w3 * L / 2.0
+        eq[10] = self.w3 * (L**2) / 12.0
 
         return eq
 
@@ -180,19 +188,27 @@ class DistributedLoad(ElementLoad):
 class ElementPointLoad(ElementLoad):
     """
     Concentrated point load acting on an element at distance x from start node.
+    - In local coordinates: p1, p2, p3 (forces), m1, m2, m3 (moments)
+    - In global coordinates: px, py, pz (forces along X, Y, Z), mx, my, mz (moments about X, Y, Z)
     """
 
     def __init__(
         self,
         element,
-        px: float = 0.0,
-        py: float = 0.0,
-        pz: float = 0.0,
-        mx: float = 0.0,
-        my: float = 0.0,
-        mz: float = 0.0,
+        p1: float = 0.0,
+        p2: float = 0.0,
+        p3: float = 0.0,
+        m1: float = 0.0,
+        m2: float = 0.0,
+        m3: float = 0.0,
         x: float = 0.0,
         coord_system: str = "local",
+        px: Optional[float] = None,
+        py: Optional[float] = None,
+        pz: Optional[float] = None,
+        mx: Optional[float] = None,
+        my: Optional[float] = None,
+        mz: Optional[float] = None,
     ):
         """
         Initialize an ElementPointLoad.
@@ -201,10 +217,10 @@ class ElementPointLoad(ElementLoad):
         ----------
         element : ElementBase
             The element.
-        px, py, pz : float, optional
-            Point force components. Defaults to 0.0.
-        mx, my, mz : float, optional
-            Point moment components. Defaults to 0.0.
+        p1, p2, p3 : float, optional
+            Point force components along local 1, 2, 3 axes. Defaults to 0.0.
+        m1, m2, m3 : float, optional
+            Point moment components about local 1, 2, 3 axes. Defaults to 0.0.
         x : float, optional
             Distance from start node along element length.
         coord_system : str, optional
@@ -215,14 +231,24 @@ class ElementPointLoad(ElementLoad):
         self.x = float(x)
 
         if self.coord_system == "global":
+            gx = px if px is not None else p1
+            gy = py if py is not None else p2
+            gz = pz if pz is not None else p3
+            gmx = mx if mx is not None else m1
+            gmy = my if my is not None else m2
+            gmz = mz if mz is not None else m3
             R = element.rotation_matrix_3x3()
-            f_loc = R @ np.array([px, py, pz], dtype=float)
-            m_loc = R @ np.array([mx, my, mz], dtype=float)
-            self.px, self.py, self.pz = float(f_loc[0]), float(f_loc[1]), float(f_loc[2])
-            self.mx, self.my, self.mz = float(m_loc[0]), float(m_loc[1]), float(m_loc[2])
+            f_loc = R @ np.array([gx, gy, gz], dtype=float)
+            m_loc = R @ np.array([gmx, gmy, gmz], dtype=float)
+            self.p1, self.p2, self.p3 = float(f_loc[0]), float(f_loc[1]), float(f_loc[2])
+            self.m1, self.m2, self.m3 = float(m_loc[0]), float(m_loc[1]), float(m_loc[2])
         else:
-            self.px, self.py, self.pz = float(px), float(py), float(pz)
-            self.mx, self.my, self.mz = float(mx), float(my), float(mz)
+            self.p1 = float(px if px is not None else p1)
+            self.p2 = float(py if py is not None else p2)
+            self.p3 = float(pz if pz is not None else p3)
+            self.m1 = float(mx if mx is not None else m1)
+            self.m2 = float(my if my is not None else m2)
+            self.m3 = float(mz if mz is not None else m3)
 
         eq_local = self._compute_equivalent_loads()
         self._transform_and_store_equivalent_loads(eq_local)
@@ -236,24 +262,24 @@ class ElementPointLoad(ElementLoad):
 
         eq = np.zeros(12, dtype=float)
 
-        # Axial px
-        eq[0] = self.px * (b / L)
-        eq[6] = self.px * (a / L)
+        # Axial p1
+        eq[0] = self.p1 * (b / L)
+        eq[6] = self.p1 * (a / L)
 
-        # Transverse py
-        eq[1] = self.py * (b**2 * (3.0 * a + b)) / (L**3)
-        eq[5] = self.py * (a * b**2) / (L**2)
-        eq[7] = self.py * (a**2 * (a + 3.0 * b)) / (L**3)
-        eq[11] = -self.py * (a**2 * b) / (L**2)
+        # Transverse p2 (bending in 1-2 about axis 3)
+        eq[1] = self.p2 * (b**2 * (3.0 * a + b)) / (L**3)
+        eq[5] = self.p2 * (a * b**2) / (L**2)
+        eq[7] = self.p2 * (a**2 * (a + 3.0 * b)) / (L**3)
+        eq[11] = -self.p2 * (a**2 * b) / (L**2)
 
-        # Transverse pz
-        eq[2] = self.pz * (b**2 * (3.0 * a + b)) / (L**3)
-        eq[4] = -self.pz * (a * b**2) / (L**2)
-        eq[8] = self.pz * (a**2 * (a + 3.0 * b)) / (L**3)
-        eq[10] = self.pz * (a**2 * b) / (L**2)
+        # Transverse p3 (bending in 1-3 about axis 2)
+        eq[2] = self.p3 * (b**2 * (3.0 * a + b)) / (L**3)
+        eq[4] = -self.p3 * (a * b**2) / (L**2)
+        eq[8] = self.p3 * (a**2 * (a + 3.0 * b)) / (L**3)
+        eq[10] = self.p3 * (a**2 * b) / (L**2)
 
-        # Torsion mx
-        eq[3] = self.mx * (b / L)
-        eq[9] = self.mx * (a / L)
+        # Torsion m1
+        eq[3] = self.m1 * (b / L)
+        eq[9] = self.m1 * (a / L)
 
         return eq

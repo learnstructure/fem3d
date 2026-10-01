@@ -12,12 +12,12 @@ frame.add_node(3, 0, 0, -5)
 frame.add_node(4, 0, 5, 0)
 
 # Material & Section properties
-# In Kassimali: Iz = 710(10^6) mm4 (strong axis), Iy = 234(10^6) mm4 (weak axis)
+# In Kassimali: I3 = 710(10^6) mm4 (strong axis), I2 = 234(10^6) mm4 (weak axis)
 E = 200e6       # kN/m2 (200 GPa)
 G = 79.31e6     # kN/m2 (79.31 GPa)
 A = 73500e-6    # m2 (73,500 mm2)
-Iz = 710e-6     # m4 (710 x 10^6 mm4) - major/strong axis
-Iy = 234e-6     # m4 (234 x 10^6 mm4) - minor/weak axis
+I3 = 710e-6     # m4 (710 x 10^6 mm4) - major/strong axis (axis 3)
+I2 = 234e-6     # m4 (234 x 10^6 mm4) - minor/weak axis (axis 2)
 J = 15e-6       # m4 (15 x 10^6 mm4)
 
 # Add 3D frame elements
@@ -26,9 +26,9 @@ J = 15e-6       # m4 (15 x 10^6 mm4)
 # Member 1: along +X, roll_angle = 0
 # Member 2: vertical along +Z, Kassimali roll Psi=90 deg relative to Y-up corresponds to roll_angle = 180 deg in fem3d
 # Member 3: along -Y, Kassimali roll Psi=30 deg corresponds to roll_angle = +30 deg in fem3d
-frame.add_frame(1, 2, 1, E, A, Iy=Iy, Iz=Iz, G=G, J=J, roll_angle=0)
-frame.add_frame(2, 3, 1, E, A, Iy=Iy, Iz=Iz, G=G, J=J, roll_angle=180)
-frame.add_frame(3, 4, 1, E, A, Iy=Iy, Iz=Iz, G=G, J=J, roll_angle=30)
+frame.add_frame(1, 2, 1, E, A, I2=I2, I3=I3, G=G, J=J, roll_angle=0)
+frame.add_frame(2, 3, 1, E, A, I2=I2, I3=I3, G=G, J=J, roll_angle=180)
+frame.add_frame(3, 4, 1, E, A, I2=I2, I3=I3, G=G, J=J, roll_angle=30)
 
 # Fixed supports at 2, 3, 4
 frame.add_support(2, [1, 1, 1, 1, 1, 1])

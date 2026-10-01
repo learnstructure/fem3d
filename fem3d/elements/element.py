@@ -17,56 +17,56 @@ class ElementBase:
     Coordinate Systems & Local Triad Definition
     -------------------------------------------
     `fem3d` uses a right-handed Cartesian global system (X, Y, Z) with **+Z vertical upward**.
-    Each 3D element establishes a right-handed orthogonal local coordinate triad (vx, vy, vz):
-      - **vx (local x'-axis)**: Directed along the member centroidal axis from node_i to node_j:
-            vx = (node_j - node_i) / L = [lx, mx, nx]
-      - **vy (local y'-axis)**: First cross-sectional axis. Associated with bending moment Iz
-        and displacement u_y.
-      - **vz (local z'-axis)**: Second cross-sectional axis. Associated with bending moment Iy
-        and displacement u_z.
+    Each 3D element establishes a right-handed orthogonal local coordinate triad (v1, v2, v3):
+      - **v1 (local 1-axis)**: Directed along the member centroidal axis from node_i to node_j:
+            v1 = (node_j - node_i) / L = [v1_x, v1_y, v1_z]
+      - **v2 (local 2-axis)**: Cross-sectional depth/web axis. Associated with bending moment I3
+        and transverse displacement u_2.
+      - **v3 (local 3-axis)**: Cross-sectional width/flange axis. Associated with bending moment I2
+        and transverse displacement u_3.
       - Orthogonality and right-hand rule:
-            vx · vy = 0,   vx · vz = 0,   vy · vz = 0
-            vx × vy = vz,  vy × vz = vx,  vz × vx = vy
+            v1 · v2 = 0,   v1 · v3 = 0,   v2 · v3 = 0
+            v1 × v2 = v3,  v2 × v3 = v1,  v3 × v1 = v2
 
     Default Unrolled Local Axes (roll_angle = 0.0, web_vector = None):
     ------------------------------------------------------------------
-    1. **Non-vertical members** (axis not parallel to global Z, sqrt(lx^2 + mx^2) > 0):
-       - vz is chosen to lie in the horizontal global XY plane (perpendicular to vx and global Z):
-             vz = (vx × [0, 0, 1]) / ||vx × [0, 0, 1]|| = [vx_y, -vx_x, 0] / sqrt(vx_x^2 + vx_y^2)
-       - vy is chosen perpendicular to vz and vx (lying in the vertical plane containing the member,
+    1. **Non-vertical members** (axis not parallel to global Z, sqrt(v1_x^2 + v1_y^2) > 0):
+       - v3 is chosen to lie in the horizontal global XY plane (perpendicular to v1 and global Z):
+             v3 = (v1 × [0, 0, 1]) / ||v1 × [0, 0, 1]|| = [v1_y, -v1_x, 0] / sqrt(v1_x^2 + v1_y^2)
+       - v2 is chosen perpendicular to v3 and v1 (lying in the vertical plane containing the member,
          pointing generally upward):
-             vy = vz × vx
-       *Example*: For a beam along global +X (vx = [1, 0, 0]):
-         vz = [0, -1, 0] (horizontal, along -Y)
-         vy = [0, 0, 1]  (vertical, along +Z)
+             v2 = v3 × v1
+       *Example*: For a beam along global +X (v1 = [1, 0, 0]):
+         v3 = [0, -1, 0] (horizontal, along -Y)
+         v2 = [0, 0, 1]  (vertical, along +Z)
 
-    2. **Vertical members** (axis parallel to global Z, sqrt(lx^2 + mx^2) == 0):
-       - If pointing upward along +Z (nx > 0):
-             vy = [0, 1, 0]   (along global +Y)
-             vz = [-1, 0, 0]  (along global -X)
-       - If pointing downward along -Z (nx < 0):
-             vy = [0, -1, 0]  (along global -Y)
-             vz = [-1, 0, 0]  (along global -X)
+    2. **Vertical members** (axis parallel to global Z, sqrt(v1_x^2 + v1_y^2) == 0):
+       - If pointing upward along +Z (v1_z > 0):
+             v2 = [0, 1, 0]   (along global +Y)
+             v3 = [-1, 0, 0]  (along global -X)
+       - If pointing downward along -Z (v1_z < 0):
+             v2 = [0, -1, 0]  (along global -Y)
+             v3 = [-1, 0, 0]  (along global -X)
 
     User-Specified Orientation:
     ---------------------------
     - **roll_angle** (beta in degrees):
-      Rotates the default (vy, vz) triad about the longitudinal axis vx by angle beta:
-          vy_rot =  cos(beta) * vy + sin(beta) * vz
-          vz_rot = -sin(beta) * vy + cos(beta) * vz
-      Positive beta rotates from vy toward vz (right-hand screw rule along vx).
+      Rotates the default (v2, v3) triad about the longitudinal axis v1 by angle beta:
+          v2_rot =  cos(beta) * v2 + sin(beta) * v3
+          v3_rot = -sin(beta) * v2 + cos(beta) * v3
+      Positive beta rotates from v2 toward v3 (right-hand screw rule along v1).
     - **web_vector** (v_ref):
-      An explicit 3D reference vector lying in the member's local x'-y' plane
+      An explicit 3D reference vector lying in the member's local 1-2 plane
       (e.g., pointing along the web of an I-beam or depth of a beam):
-          vz = (vx × v_ref) / ||vx × v_ref||
-          vy = vz × vx
+          v3 = (v1 × v_ref) / ||v1 × v_ref||
+          v2 = v3 × v1
 
     Coordinate Transformation:
     --------------------------
     The 3x3 direction cosine rotation matrix R maps global vectors to local vectors:
-        R = [ vx^T ]
-            [ vy^T ]
-            [ vz^T ]
+        R = [ v1^T ]
+            [ v2^T ]
+            [ v3^T ]
         v_local = R @ v_global
         v_global = R.T @ v_local
 
@@ -105,10 +105,10 @@ class ElementBase:
         node_j : Node
             End node.
         roll_angle : float, optional
-            Member roll angle in degrees about local x'-axis (vx).
-            Rotates the local (y', z') axes. Defaults to 0.0.
+            Member roll angle in degrees about local 1-axis (v1).
+            Rotates the local (2, 3) axes. Defaults to 0.0.
         web_vector : numpy.ndarray, optional
-            Reference orientation vector pointing in the local x'-y' plane (e.g. web direction).
+            Reference orientation vector pointing in the local 1-2 plane (e.g. web direction / v2).
             If provided, overrides default orientation. Defaults to None.
         """
         self.id = eid
@@ -121,7 +121,7 @@ class ElementBase:
         self._update_geometry()
 
     def _update_geometry(self):
-        """Compute length, orientation unit vectors vx, vy, vz, and rotation matrix R."""
+        """Compute length, orientation unit vectors v1, v2, v3, and rotation matrix R."""
         dx = self.node_j.x - self.node_i.x
         dy = self.node_j.y - self.node_i.y
         dz = self.node_j.z - self.node_i.z
@@ -136,59 +136,58 @@ class ElementBase:
                 f"Element {self.id} has zero length: node_i and node_j are coincident."
             )
 
-        # Unit vector along member axis (local x')
-        vx = np.array([dx, dy, dz], dtype=float) / self.length
-        self.vx = vx
+        # Unit vector along member axis (local 1-axis)
+        v1 = np.array([dx, dy, dz], dtype=float) / self.length
+        self.v1 = v1
 
         # Determine reference local axes
         if self.web_vector is not None:
             # User supplied custom orientation vector
             v_ref = self.web_vector
-            # Project reference vector perpendicular to vx
-            vz_temp = np.cross(vx, v_ref)
-            norm_z = np.linalg.norm(vz_temp)
-            if norm_z < 1e-8:
+            # Project reference vector perpendicular to v1
+            v3_temp = np.cross(v1, v_ref)
+            norm_3 = np.linalg.norm(v3_temp)
+            if norm_3 < 1e-8:
                 raise ValueError(
                     f"Element {self.id}: web_vector is parallel to the member axis."
                 )
-            vz = vz_temp / norm_z
-            vy = np.cross(vz, vx)
+            v3 = v3_temp / norm_3
+            v2 = np.cross(v3, v1)
         else:
             # Default orientation: global Z is vertical
             # Check if member is vertical (parallel to global Z)
-            proj_xy = math.sqrt(vx[0] ** 2 + vx[1] ** 2)
+            proj_xy = math.sqrt(v1[0] ** 2 + v1[1] ** 2)
             if proj_xy > 1e-6:
-                # Non-vertical member: local z' is horizontal (in XY plane)
-                # vz = (vx x [0, 0, 1]) / norm
-                # vx x [0, 0, 1] = [vx[1], -vx[0], 0]
-                vz = np.array([vx[1], -vx[0], 0.0], dtype=float) / proj_xy
-                vy = np.cross(vz, vx)
+                # Non-vertical member: local 3-axis is horizontal (in XY plane)
+                # v3 = (v1 x [0, 0, 1]) / norm
+                v3 = np.array([v1[1], -v1[0], 0.0], dtype=float) / proj_xy
+                v2 = np.cross(v3, v1)
             else:
                 # Vertical member along global Z
-                if vx[2] > 0:  # pointing +Z
-                    vy = np.array([0.0, 1.0, 0.0], dtype=float)
-                    vz = np.array([-1.0, 0.0, 0.0], dtype=float)
+                if v1[2] > 0:  # pointing +Z
+                    v2 = np.array([0.0, 1.0, 0.0], dtype=float)
+                    v3 = np.array([-1.0, 0.0, 0.0], dtype=float)
                 else:  # pointing -Z
-                    vy = np.array([0.0, -1.0, 0.0], dtype=float)
-                    vz = np.array([-1.0, 0.0, 0.0], dtype=float)
+                    v2 = np.array([0.0, -1.0, 0.0], dtype=float)
+                    v3 = np.array([-1.0, 0.0, 0.0], dtype=float)
 
-        # Apply roll angle beta if non-zero (rotate vy and vz about vx)
+        # Apply roll angle beta if non-zero (rotate v2 and v3 about v1)
         if abs(self.roll_angle) > 1e-9:
             beta = math.radians(self.roll_angle)
             cos_b = math.cos(beta)
             sin_b = math.sin(beta)
-            vy_rot = cos_b * vy + sin_b * vz
-            vz_rot = -sin_b * vy + cos_b * vz
-            vy = vy_rot
-            vz = vz_rot
+            v2_rot = cos_b * v2 + sin_b * v3
+            v3_rot = -sin_b * v2 + cos_b * v3
+            v2 = v2_rot
+            v3 = v3_rot
 
         # Ensure unit lengths
-        self.vy = vy / np.linalg.norm(vy)
-        self.vz = vz / np.linalg.norm(vz)
+        self.v2 = v2 / np.linalg.norm(v2)
+        self.v3 = v3 / np.linalg.norm(v3)
 
         # 3x3 Direction Cosine Rotation Matrix R:
         # local_vector = R @ global_vector
-        self.R = np.array([self.vx, self.vy, self.vz], dtype=float)
+        self.R = np.array([self.v1, self.v2, self.v3], dtype=float)
 
     def rotation_matrix_3x3(self) -> np.ndarray:
         """Return the 3x3 direction cosine rotation matrix."""

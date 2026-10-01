@@ -89,16 +89,16 @@ class TrussElement(ElementBase):
         """
         Return the 12x12 global stiffness matrix for the truss element.
         Directly computed via outer product of member direction cosines:
-            K_trans = (EA/L) * [ vx*vx^T  -vx*vx^T ]
-                               [ -vx*vx^T  vx*vx^T ]
+            K_trans = (EA/L) * [ v1*v1^T  -v1*v1^T ]
+                               [ -v1*v1^T  v1*v1^T ]
         """
         E = self.material.E
         A = self.area
         L = self.length
         EA_L = E * A / L
 
-        vx = self.vx.reshape(3, 1)
-        k33 = EA_L * (vx @ vx.T)
+        v1 = self.v1.reshape(3, 1)
+        k33 = EA_L * (v1 @ v1.T)
 
         K_g = np.zeros((12, 12), dtype=float)
         # Node i translations (dofs 0, 1, 2)
@@ -138,9 +138,9 @@ class TrussElement(ElementBase):
         if abs(P) < 1e-12:
             return np.zeros((12, 12), dtype=float)
 
-        vx = self.vx.reshape(3, 1)
-        I3 = np.eye(3)
-        kg33 = (P / L) * (I3 - vx @ vx.T)
+        v1 = self.v1.reshape(3, 1)
+        I_eye3 = np.eye(3)
+        kg33 = (P / L) * (I_eye3 - v1 @ v1.T)
 
         Kg = np.zeros((12, 12), dtype=float)
         Kg[0:3, 0:3] = kg33
@@ -156,7 +156,7 @@ class TrussElement(ElementBase):
         Returns
         -------
         numpy.ndarray
-            12-element vector with non-zero values only at fx_i and fx_j.
+            12-element vector with non-zero values only at f1_i and f1_j.
         """
         if self.structure is None or self.structure.disp is None:
             raise ValueError("Structure has not been solved yet.")
@@ -164,14 +164,14 @@ class TrussElement(ElementBase):
         u_j = self.structure.disp[self.node_j.dofs[0:3]]
 
         # Elongation along member vector
-        delta_L = float(np.dot(self.vx, u_j - u_i))
+        delta_L = float(np.dot(self.v1, u_j - u_i))
         axial_tension = (self.material.E * self.area / self.length) * delta_L
 
-        # Local forces: compression positive in fx_i, or standard tension convention
-        # We follow standard convention: [fx_i, 0, 0, 0, 0, 0, fx_j, 0, ...]
+        # Local forces: compression positive in f1_i, or standard tension convention
+        # We follow standard convention: [f1_i, 0, 0, 0, 0, 0, f1_j, 0, ...]
         f_local = np.zeros(12, dtype=float)
-        f_local[0] = -axial_tension  # tension pulls on node i (-x')
-        f_local[6] = axial_tension   # tension pulls on node j (+x')
+        f_local[0] = -axial_tension  # tension pulls on node i (-1 axis)
+        f_local[6] = axial_tension   # tension pulls on node j (+1 axis)
         return f_local
 
     def axial_force(self) -> float:

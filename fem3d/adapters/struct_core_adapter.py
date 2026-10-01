@@ -42,7 +42,7 @@ from ..sections.section import Section
 from ..elements.frame import FrameElement
 from ..elements.truss import TrussElement
 from ..elements.spring import SpringElement
-from ..loads import PointLoad
+from ..loads import PointLoad, DistributedLoad
 from ..structure import Structure
 from ..results import Results
 
@@ -56,7 +56,11 @@ def _check_struct_core():
         )
 
 
-def model_from_core(source: Union[StructuralModel, Project]) -> Structure:
+def model_from_core(
+    source: Union[StructuralModel, Project],
+    load_case_id: Optional[Union[int, str]] = None,
+    load_combination_id: Optional[str] = None,
+) -> Structure:
     """
     Convert a struct_core.StructuralModel or struct_core.Project into a fem3d.Structure.
     """
@@ -117,16 +121,24 @@ def model_from_core(source: Union[StructuralModel, Project]) -> Structure:
             sec_map[sec.id] = Section.from_circle(diameter=sec.d)
         else:
             A = getattr(sec, "A", 1.0)
-            Iz = getattr(sec, "Iz", 1.0)
-            Iy = getattr(sec, "Iy", Iz)
-            J = getattr(sec, "J", Iz + Iy)
-            sec_map[sec.id] = Section(A=A, Iy=Iy, Iz=Iz, J=J)
+            I3 = getattr(sec, "I3", 1.0)
+            I2 = getattr(sec, "I2", I3)
+            J = getattr(sec, "J", I3 + I2)
+            sec_map[sec.id] = Section(A=A, I2=I2, I3=I3, J=J)
 
     # 5. Elements
     for elem in model.elements:
+        if elem.start_node not in structure.nodes or elem.end_node not in structure.nodes:
+            continue
         n_i = structure.nodes[elem.start_node]
         n_j = structure.nodes[elem.end_node]
         elem_type = getattr(elem, "type", "beam")
+
+        dx = float(n_j.x - n_i.x)
+        dy = float(n_j.y - n_i.y)
+        dz = float(n_j.z - n_i.z)
+        if (dx**2 + dy**2 + dz**2) < 1e-12 and elem_type != "spring":
+            continue
 
         if elem_type == "truss":
             mat = mat_map.get(elem.material_id, ElasticMaterial(E=29000.0))
@@ -139,23 +151,98 @@ def model_from_core(source: Union[StructuralModel, Project]) -> Structure:
             fem_el = SpringElement(eid=elem.id, node_i=n_i, node_j=n_j, kx=kx, ky=ky, kz=kz)
         else:  # Beam / Frame
             mat = mat_map.get(elem.material_id, ElasticMaterial(E=29000.0))
-            sec = sec_map.get(elem.section_id, Section(A=10.0, Iy=100.0, Iz=200.0, J=50.0))
+            sec = sec_map.get(elem.section_id, Section(A=10.0, I2=100.0, I3=200.0, J=50.0))
             fem_el = FrameElement(eid=elem.id, node_i=n_i, node_j=n_j, material=mat, section=sec)
 
         structure.add_element(fem_el)
 
     # 6. Loads
-    for ld in getattr(model, "loads", []):
-        if getattr(ld, "type", "") == "nodal_point":
-            nid = ld.node_id
-            if nid in structure.nodes:
-                fx = getattr(ld, "fx", 0.0)
-                fy = getattr(ld, "fy", 0.0)
-                fz = getattr(ld, "fz", 0.0)
-                mx = getattr(ld, "mx", 0.0)
-                my = getattr(ld, "my", 0.0)
-                mz = getattr(ld, "mz", 0.0)
-                structure.add_load(PointLoad(structure.nodes[nid], fx=fx, fy=fy, fz=fz, mx=mx, my=my, mz=mz))
+    target_comb = None
+    if load_combination_id is not None:
+        target_comb = next(
+            (c for c in getattr(model, "load_combinations", []) if c.id == load_combination_id), None
+        )
+    elif load_case_id is not None and getattr(model, "load_combinations", None):
+        target_comb = next(
+            (c for c in model.load_combinations if c.id == load_case_id), None
+        )
+
+    if target_comb is not None:
+        load_cases_map = {lc.id: lc for lc in getattr(model, "load_cases", [])}
+        for factor_obj in target_comb.factors:
+            lc = load_cases_map.get(factor_obj.load_case_id)
+            if not lc:
+                continue
+            factor = factor_obj.factor
+            for pl in getattr(lc, "point_loads", []):
+                nid = pl.node_id
+                if nid in structure.nodes:
+                    fx = getattr(pl, "fx", 0.0) * factor
+                    fy = getattr(pl, "fy", 0.0) * factor
+                    fz = getattr(pl, "fz", 0.0) * factor
+                    mx = getattr(pl, "mx", 0.0) * factor
+                    my = getattr(pl, "my", 0.0) * factor
+                    mz = getattr(pl, "mz", 0.0) * factor
+                    structure.add_load(PointLoad(structure.nodes[nid], fx=fx, fy=fy, fz=fz, mx=mx, my=my, mz=mz))
+            for dl in list(getattr(lc, "element_loads", []) or getattr(lc, "distributed_loads", [])):
+                eid = dl.element_id
+                if eid in structure.elements:
+                    el = structure.elements[eid]
+                    w1 = float(getattr(dl, "w1", getattr(dl, "wx", 0.0)) or 0.0) * factor
+                    w2 = float(getattr(dl, "w2", getattr(dl, "wy", 0.0)) or 0.0) * factor
+                    w3 = float(getattr(dl, "w3", getattr(dl, "wz", 0.0)) or 0.0) * factor
+                    cs = "local" if getattr(dl, "is_local", False) else "global"
+                    structure.add_load(DistributedLoad(el, w1=w1, w2=w2, w3=w3, coord_system=cs))
+    else:
+        load_cases = getattr(model, "load_cases", [])
+        if load_cases:
+            if load_case_id is not None and str(load_case_id).upper() not in ("ALL", "TOTAL", "ENVELOPE"):
+                cases_to_apply = [lc for lc in load_cases if str(lc.id).upper() == str(load_case_id).upper()]
+                if not cases_to_apply:
+                    cases_to_apply = [lc for lc in load_cases if str(getattr(lc, "name", "")).upper() == str(load_case_id).upper()]
+                if not cases_to_apply:
+                    active_cases = [
+                        lc for lc in load_cases
+                        if lc.point_loads or getattr(lc, "element_loads", []) or getattr(lc, "distributed_loads", [])
+                    ]
+                    cases_to_apply = active_cases if active_cases else [load_cases[0]]
+            else:
+                cases_to_apply = load_cases
+
+            for lc in cases_to_apply:
+                for pl in getattr(lc, "point_loads", []):
+                    nid = pl.node_id
+                    if nid in structure.nodes:
+                        fx = getattr(pl, "fx", 0.0)
+                        fy = getattr(pl, "fy", 0.0)
+                        fz = getattr(pl, "fz", 0.0)
+                        mx = getattr(pl, "mx", 0.0)
+                        my = getattr(pl, "my", 0.0)
+                        mz = getattr(pl, "mz", 0.0)
+                        structure.add_load(PointLoad(structure.nodes[nid], fx=fx, fy=fy, fz=fz, mx=mx, my=my, mz=mz))
+
+                for dl in list(getattr(lc, "element_loads", []) or getattr(lc, "distributed_loads", [])):
+                    eid = dl.element_id
+                    if eid in structure.elements:
+                        el = structure.elements[eid]
+                        w1 = float(getattr(dl, "w1", getattr(dl, "wx", 0.0)) or 0.0)
+                        w2 = float(getattr(dl, "w2", getattr(dl, "wy", 0.0)) or 0.0)
+                        w3 = float(getattr(dl, "w3", getattr(dl, "wz", 0.0)) or 0.0)
+                        cs = "local" if getattr(dl, "is_local", False) else "global"
+                        structure.add_load(DistributedLoad(el, w1=w1, w2=w2, w3=w3, coord_system=cs))
+
+        # Legacy backward compatibility with model.loads
+        for ld in getattr(model, "loads", []):
+            if getattr(ld, "type", "") == "nodal_point":
+                nid = ld.node_id
+                if nid in structure.nodes:
+                    fx = getattr(ld, "fx", 0.0)
+                    fy = getattr(ld, "fy", 0.0)
+                    fz = getattr(ld, "fz", 0.0)
+                    mx = getattr(ld, "mx", 0.0)
+                    my = getattr(ld, "my", 0.0)
+                    mz = getattr(ld, "mz", 0.0)
+                    structure.add_load(PointLoad(structure.nodes[nid], fx=fx, fy=fy, fz=fz, mx=mx, my=my, mz=mz))
 
     return structure
 
@@ -218,7 +305,7 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
 
         if hasattr(el, "section") and el.section is not None:
             sec = el.section
-            sec_key = (sec.A, sec.Iy, sec.Iz, sec.J)
+            sec_key = (sec.A, sec.I2, sec.I3, sec.J)
             if sec_key not in sec_ids:
                 sid = f"sec_{len(sec_ids)+1}"
                 sec_ids[sec_key] = sid
@@ -226,8 +313,8 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
                     ScGeneralSection(
                         id=sid,
                         A=sec.A,
-                        Iz=sec.Iz if sec.Iz > 0 else 1.0,
-                        Iy=sec.Iy if sec.Iy > 0 else 1.0,
+                        I2=sec.I2 if sec.I2 > 0 else 1.0,
+                        I3=sec.I3 if sec.I3 > 0 else 1.0,
                         J=sec.J if sec.J > 0 else 1.0,
                     )
                 )
@@ -236,7 +323,7 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
     for el in structure.elements.values():
         if isinstance(el, TrussElement):
             mid = mat_ids.get((el.material.E, getattr(el.material, "nu", 0.3), el.material.rho))
-            sid = sec_ids.get((el.section.A, el.section.Iy, el.section.Iz, el.section.J))
+            sid = sec_ids.get((el.section.A, el.section.I2, el.section.I3, el.section.J))
             model.elements.append(
                 ScTrussElement(
                     id=el.id,
@@ -259,7 +346,7 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
             )
         else:
             mid = mat_ids.get((el.material.E, getattr(el.material, "nu", 0.3), el.material.rho))
-            sid = sec_ids.get((el.section.A, el.section.Iy, el.section.Iz, el.section.J))
+            sid = sec_ids.get((el.section.A, el.section.I2, el.section.I3, el.section.J))
             model.elements.append(
                 ScBeamElement(
                     id=el.id,
@@ -320,28 +407,28 @@ def result_to_core(source: Union[Results, Structure, object]) -> AnalysisResult:
         eid = row["element"]
         sf_i = BeamSectionForce(
             station=0.0,
-            P=float(row["fx_i"]),
-            Vy=float(row["fy_i"]),
-            Vz=float(row["fz_i"]),
-            T=float(row["mx_i"]),
-            My=float(row["my_i"]),
-            Mz=float(row["mz_i"]),
+            P=float(row["f1_i"]),
+            V2=float(row["f2_i"]),
+            V3=float(row["f3_i"]),
+            T=float(row["m1_i"]),
+            M2=float(row["m2_i"]),
+            M3=float(row["m3_i"]),
         )
         sf_j = BeamSectionForce(
             station=1.0,
-            P=float(row["fx_j"]),
-            Vy=float(row["fy_j"]),
-            Vz=float(row["fz_j"]),
-            T=float(row["mx_j"]),
-            My=float(row["my_j"]),
-            Mz=float(row["mz_j"]),
+            P=float(row["f1_j"]),
+            V2=float(row["f2_j"]),
+            V3=float(row["f3_j"]),
+            T=float(row["m1_j"]),
+            M2=float(row["m2_j"]),
+            M3=float(row["m3_j"]),
         )
         element_results[eid] = ElementResult(
             element_id=eid,
             forces=[sf_i, sf_j],
             max_axial=max(abs(sf_i.P), abs(sf_j.P)),
-            max_moment=max(abs(sf_i.Mz), abs(sf_j.Mz), abs(sf_i.My), abs(sf_j.My)),
-            max_shear=max(abs(sf_i.Vy), abs(sf_j.Vy), abs(sf_i.Vz), abs(sf_j.Vz)),
+            max_moment=max(abs(sf_i.M3), abs(sf_j.M3), abs(sf_i.M2), abs(sf_j.M2)),
+            max_shear=max(abs(sf_i.V2), abs(sf_j.V2), abs(sf_i.V3), abs(sf_j.V3)),
         )
 
     return AnalysisResult(

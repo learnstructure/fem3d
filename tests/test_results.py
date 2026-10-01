@@ -11,9 +11,9 @@ def test_results_and_create_report():
     frame.add_node(2, 60.0, 0.0, 0.0)
     frame.add_node(3, 60.0, 60.0, 0.0)
 
-    E, A, Iy, Iz, J = 29000.0, 10.0, 50.0, 100.0, 20.0
-    frame.add_frame(1, 1, 2, E, A, Iy, Iz, J)
-    frame.add_frame(2, 2, 3, E, A, Iy, Iz, J)
+    E, A, I2, I3, J = 29000.0, 10.0, 50.0, 100.0, 20.0
+    frame.add_frame(1, 1, 2, E, A, I2=I2, I3=I3, J=J)
+    frame.add_frame(2, 2, 3, E, A, I2=I2, I3=I3, J=J)
 
     frame.add_support(1, [1, 1, 1, 1, 1, 1])
     frame.add_support(3, [1, 1, 1, 1, 1, 1])
@@ -32,7 +32,8 @@ def test_results_and_create_report():
     assert len(reac_df) == 3
     assert "Fx" in reac_df.columns and "Fz" in reac_df.columns
     assert len(forces_df) == 2
-    assert "fz_i" in forces_df.columns and "mz_j" in forces_df.columns
+    assert "f3_i" in forces_df.columns and "m3_j" in forces_df.columns
+    assert "V3_i" in forces_df.columns and "M3_j" in forces_df.columns
 
     report = results.create_report(print_report=False)
     assert "3D Structural Analysis Report" in report

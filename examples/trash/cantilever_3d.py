@@ -2,25 +2,25 @@
 Example: 3D Cantilever Beam under Combined Axial, Torsion, and Biaxial Bending.
 
 Analytical Verification:
-Length L = 100 in, Section: Rectangular b = 4 in (along y'), h = 6 in (along z')
+Length L = 100 in, Section: Rectangular b = 4 in (along local 2-axis), h = 6 in (along local 3-axis)
 E = 30000 ksi, nu = 0.3 -> G = E / (2*(1+nu)) = 11538.46 ksi
 A = 24 in^2
-Iz = b * h^3 / 12 = 72 in^4 (strong axis)
-Iy = h * b^3 / 12 = 32 in^4 (weak axis)
+I3 = b * h^3 / 12 = 72 in^4 (bending about local 3-axis)
+I2 = h * b^3 / 12 = 32 in^4 (bending about local 2-axis)
 J = 4 * (4^3) * (1/3 - 0.21*(4/6)*(1 - 4^4/(12*6^4))) ~ 52.32 in^4
 
 Loads at free tip (Node 2):
 Fx = 24 kips (axial tension)
-Fy = 5 kips (lateral shear bending about z')
-Fz = 10 kips (vertical shear bending about y')
+Fy = 5 kips (lateral shear bending about local 3-axis)
+Fz = 10 kips (vertical shear bending about local 2-axis)
 Mx = 50 kip-in (torsion)
 
 Theoretical tip displacements:
 ux = Fx * L / (E * A) = 24 * 100 / (30000 * 24) = 0.003333 in
-uy = Fy * L^3 / (3 * E * Iz) = 5 * 100^3 / (3 * 30000 * 72) = 0.771605 in
-rz = Fy * L^2 / (2 * E * Iz) = 5 * 100^2 / (2 * 30000 * 72) = 0.011574 rad
-uz = Fz * L^3 / (3 * E * Iy) = 10 * 100^3 / (3 * 30000 * 32) = 3.472222 in
-ry = -Fz * L^2 / (2 * E * Iy) = -10 * 100^2 / (2 * 30000 * 32) = -0.052083 rad
+uy = Fy * L^3 / (3 * E * I3) = 5 * 100^3 / (3 * 30000 * 72) = 0.771605 in
+rz = Fy * L^2 / (2 * E * I3) = 5 * 100^2 / (2 * 30000 * 72) = 0.011574 rad
+uz = Fz * L^3 / (3 * E * I2) = 10 * 100^3 / (3 * 30000 * 32) = 3.472222 in
+ry = -Fz * L^2 / (2 * E * I2) = -10 * 100^2 / (2 * 30000 * 32) = -0.052083 rad
 rx = Mx * L / (G * J)
 """
 
@@ -38,13 +38,13 @@ def main():
     b = 4.0
     h = 6.0
     A = b * h
-    Iz = b * (h**3) / 12.0
-    Iy = h * (b**3) / 12.0
+    I3 = b * (h**3) / 12.0
+    I2 = h * (b**3) / 12.0
     # Torsional constant J
     a, c = max(b, h), min(b, h)
     J = a * (c**3) * (1.0 / 3.0 - 0.21 * (c / a) * (1.0 - (c**4) / (12.0 * a**4)))
 
-    frame.add_frame(1, 1, 2, E=E, A=A, Iy=Iy, Iz=Iz, J=J, nu=nu)
+    frame.add_frame(1, 1, 2, E=E, A=A, I2=I2, I3=I3, J=J, nu=nu)
 
     # Fully fixed base [ux, uy, uz, rx, ry, rz]
     frame.add_support(1, [1, 1, 1, 1, 1, 1])
@@ -66,8 +66,8 @@ def main():
     # Theoretical validation checks
     G = E / (2.0 * (1.0 + nu))
     expected_ux = 24.0 * 100.0 / (E * A)
-    expected_uy = 5.0 * (100.0**3) / (3.0 * E * Iz)
-    expected_uz = 10.0 * (100.0**3) / (3.0 * E * Iy)
+    expected_uy = 5.0 * (100.0**3) / (3.0 * E * I3)
+    expected_uz = 10.0 * (100.0**3) / (3.0 * E * I2)
     expected_rx = 50.0 * 100.0 / (G * J)
 
     u_tip = results.node_displacements().iloc[1]

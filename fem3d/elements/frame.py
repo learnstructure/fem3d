@@ -17,8 +17,8 @@ class FrameElement(ElementBase):
     The formulation supports:
     - Axial extension / compression (EA)
     - St. Venant torsion (GJ)
-    - Flexure in local x'-y' plane about local z'-axis (E*Iz) and shear
-    - Flexure in local x'-z' plane about local y'-axis (E*Iy) and shear
+    - Flexure in local 1-2 plane about local 3-axis (E*I3) and shear
+    - Flexure in local 1-3 plane about local 2-axis (E*I2) and shear
     - Consistent and lumped mass matrices
     - 3D geometric stiffness matrix (Kg) for linear elastic buckling analysis
     - Optional end releases (hinges)
@@ -27,8 +27,8 @@ class FrameElement(ElementBase):
     ---------------------------------------
     Local displacement vector (size 12):
         u_local = [
-            u_x1, u_y1, u_z1, theta_x1, theta_y1, theta_z1,
-            u_x2, u_y2, u_z2, theta_x2, theta_y2, theta_z2
+            u_1i, u_2i, u_3i, theta_1i, theta_2i, theta_3i,
+            u_1j, u_2j, u_3j, theta_1j, theta_2j, theta_3j
         ]
 
     Stiffness Matrix Theory & Citations
@@ -41,25 +41,23 @@ class FrameElement(ElementBase):
     - McGuire, W., Gallagher, R. H., & Ziemian, R. D. (2000). Matrix Structural Analysis
       (2nd ed.). John Wiley & Sons, Section 5.1, pp. 115-120.
 
-    Sign Convention & Local Axes:
-    -----------------------------
-    - Local x' is along the member centroidal axis from node_i to node_j.
-    - Local y' and z' form a right-handed orthogonal triad with x' (x' × y' = z').
+    Sign Convention & Local Axes (1, 2, 3):
+    ---------------------------------------
+    - Local axis 1 (v1) is along the member centroidal axis from node_i to node_j.
+    - Local axes 2 (v2) and 3 (v3) form a right-handed orthogonal triad with axis 1 (v1 x v2 = v3).
     - Right-hand rule applies to rotations, moments, and roll angle.
-    - **Iz block (bending in local x'-y' plane)**:
-        Deflection is u_y (along local y'), rotation is theta_z (about local z').
-        Resisted by Iz = ∫ y'^2 dA.
-        Curvature = d^2(u_y)/dx^2, slope = d(u_y)/dx = +theta_z.
-    - **Iy block (bending in local x'-z' plane)**:
-        Deflection is u_z (along local z'), rotation is theta_y (about local y').
-        Resisted by Iy = ∫ z'^2 dA.
-        Curvature = d^2(u_z)/dx^2, slope = d(u_z)/dx = -theta_y.
-        (Note the negative sign: by right-hand rule about local y', a positive rotation
-        theta_y causes displacement in the negative z' direction).
-    - **Moments of Inertia Note**:
-        Neither Iz nor Iy is generically labeled "strong" or "weak". Whether Iz or Iy
-        provides greater flexural rigidity depends on the cross-section geometry and
-        how the member is oriented (roll angle) in 3D space.
+    - **I3 block (bending in local 1-2 plane)**:
+        Deflection is u_2 (along local 2-axis), rotation is theta_3 (about local 3-axis).
+        Resisted by I3 = ∫ x2^2 dA.
+        Curvature = d^2(u_2)/dx1^2, slope = d(u_2)/dx1 = +theta_3.
+    - **I2 block (bending in local 1-3 plane)**:
+        Deflection is u_3 (along local 3-axis), rotation is theta_2 (about local 2-axis).
+        Resisted by I2 = ∫ x3^2 dA.
+        Curvature = d^2(u_3)/dx1^2, slope = d(u_3)/dx1 = -theta_2.
+        (Note the negative sign: by right-hand rule about local 2-axis, a positive rotation
+        theta_2 causes displacement in the negative 3-axis direction).
+    - **Moments of Inertia**:
+        I3 resists in-plane flexure (about local 3-axis), and I2 resists out-of-plane flexure (about local 2-axis).
     """
 
     def __init__(
@@ -92,20 +90,20 @@ class FrameElement(ElementBase):
         section : Section or float
             Section definition or numeric cross-sectional area A.
         roll_angle : float, optional
-            Member roll angle in degrees about local x'-axis (vx).
-            Rotates the local (y', z') axes. Defaults to 0.0.
+            Member roll angle in degrees about local 1-axis (v1).
+            Rotates the local (2, 3) axes. Defaults to 0.0.
         web_vector : numpy.ndarray, optional
-            Reference orientation vector pointing in the local x'-y' plane (e.g. web direction).
+            Reference orientation vector pointing in the local 1-2 plane (e.g. web direction / v2).
             If provided, overrides default orientation. Defaults to None.
         extra_mass : float, optional
             Additional distributed non-structural mass per unit length. Defaults to 0.0.
         releases_i : list of bool, optional
-            End release fixity at start node [ux, uy, uz, rx, ry, rz].
+            End release fixity at start node [u1, u2, u3, r1, r2, r3].
             True indicates released (zero force/moment).
         releases_j : list of bool, optional
-            End release fixity at end node [ux, uy, uz, rx, ry, rz].
+            End release fixity at end node [u1, u2, u3, r1, r2, r3].
         include_shear_deformation : bool, optional
-            Whether to include Timoshenko shear deformation if shear areas Asy, Asz are present.
+            Whether to include Timoshenko shear deformation if shear areas As2, As3 are present.
         """
         super().__init__(
             eid, node_i, node_j, roll_angle=roll_angle, web_vector=web_vector
@@ -124,8 +122,8 @@ class FrameElement(ElementBase):
             self.section = section
 
         self.area = self.section.A
-        self.Iy = self.section.Iy
-        self.Iz = self.section.Iz
+        self.I2 = self.section.I2
+        self.I3 = self.section.I3
         self.J = self.section.J
         self.extra_mass = float(extra_mass)
         self.include_shear_deformation = include_shear_deformation
@@ -149,24 +147,26 @@ class FrameElement(ElementBase):
         E = self.material.E
         G = self.material.G
         A = self.area
-        Iy = self.Iy
-        Iz = self.Iz
+        I2 = self.I2
+        I3 = self.I3
         J = self.J
         L = self.length
 
-        # Timoshenko shear factors: phi_y (for bending about z) and phi_z (for bending about y)
-        phi_y = 0.0
-        phi_z = 0.0
+        # Timoshenko shear factors: phi_2 (for bending in 1-2 about 3) and phi_3 (for bending in 1-3 about 2)
+        phi_2 = 0.0
+        phi_3 = 0.0
         if self.include_shear_deformation:
-            if getattr(self.section, "Asy", 0.0) > 0:
-                phi_y = 12.0 * E * Iz / (G * self.section.Asy * L * L)
-            if getattr(self.section, "Asz", 0.0) > 0:
-                phi_z = 12.0 * E * Iy / (G * self.section.Asz * L * L)
+            as2 = getattr(self.section, "As2", 0.0)
+            as3 = getattr(self.section, "As3", 0.0)
+            if as2 > 0:
+                phi_2 = 12.0 * E * I3 / (G * as2 * L * L)
+            if as3 > 0:
+                phi_3 = 12.0 * E * I2 / (G * as3 * L * L)
 
         k = np.zeros((12, 12), dtype=float)
 
         # -------------------------------------------------------------
-        # 1. Axial stiffness terms (dofs 0, 6: u_x1, u_x2)
+        # 1. Axial stiffness terms (dofs 0, 6: u_1i, u_1j)
         # Reference: Przemieniecki Eq. (5.58)
         # -------------------------------------------------------------
         EA_L = E * A / L
@@ -176,7 +176,7 @@ class FrameElement(ElementBase):
         k[6, 6] = EA_L
 
         # -------------------------------------------------------------
-        # 2. Torsional stiffness terms (dofs 3, 9: theta_x1, theta_x2)
+        # 2. Torsional stiffness terms (dofs 3, 9: theta_1i, theta_1j)
         # Reference: Przemieniecki Eq. (5.58)
         # -------------------------------------------------------------
         if J > 0.0 and G > 0.0:
@@ -187,70 +187,72 @@ class FrameElement(ElementBase):
             k[9, 9] = GJ_L
 
         # -------------------------------------------------------------
-        # 3. Bending in x'-y' plane about z'-axis (dofs 1, 5, 7, 11: u_y1, theta_z1, u_y2, theta_z2)
+        # 3. Bending in 1-2 plane about local 3-axis (dofs 1, 5, 7, 11: u_2i, theta_3i, u_2j, theta_3j)
+        # Resisted by I3.
         # Reference: Przemieniecki Eq. (5.58) & Weaver-Gere Section 4.11
         # -------------------------------------------------------------
-        if Iz > 0.0:
-            factor_y = 1.0 + phi_y
-            k12_z = 12.0 * E * Iz / (L**3 * factor_y)
-            k6_z = 6.0 * E * Iz / (L**2 * factor_y)
-            k4_z = (4.0 + phi_y) * E * Iz / (L * factor_y)
-            k2_z = (2.0 - phi_y) * E * Iz / (L * factor_y)
+        if I3 > 0.0:
+            factor_2 = 1.0 + phi_2
+            k12_3 = 12.0 * E * I3 / (L**3 * factor_2)
+            k6_3 = 6.0 * E * I3 / (L**2 * factor_2)
+            k4_3 = (4.0 + phi_2) * E * I3 / (L * factor_2)
+            k2_3 = (2.0 - phi_2) * E * I3 / (L * factor_2)
 
-            k[1, 1] = k12_z
-            k[1, 5] = k6_z
-            k[1, 7] = -k12_z
-            k[1, 11] = k6_z
+            k[1, 1] = k12_3
+            k[1, 5] = k6_3
+            k[1, 7] = -k12_3
+            k[1, 11] = k6_3
 
-            k[5, 1] = k6_z
-            k[5, 5] = k4_z
-            k[5, 7] = -k6_z
-            k[5, 11] = k2_z
+            k[5, 1] = k6_3
+            k[5, 5] = k4_3
+            k[5, 7] = -k6_3
+            k[5, 11] = k2_3
 
-            k[7, 1] = -k12_z
-            k[7, 5] = -k6_z
-            k[7, 7] = k12_z
-            k[7, 11] = -k6_z
+            k[7, 1] = -k12_3
+            k[7, 5] = -k6_3
+            k[7, 7] = k12_3
+            k[7, 11] = -k6_3
 
-            k[11, 1] = k6_z
-            k[11, 5] = k2_z
-            k[11, 7] = -k6_z
-            k[11, 11] = k4_z
+            k[11, 1] = k6_3
+            k[11, 5] = k2_3
+            k[11, 7] = -k6_3
+            k[11, 11] = k4_3
 
         # -------------------------------------------------------------
-        # 4. Bending in x'-z' plane about y'-axis (dofs 2, 4, 8, 10: u_z1, theta_y1, u_z2, theta_y2)
+        # 4. Bending in 1-3 plane about local 2-axis (dofs 2, 4, 8, 10: u_3i, theta_2i, u_3j, theta_2j)
+        # Resisted by I2.
         # Sign convention note:
-        # Rotation theta_y is about local y'-axis.
-        # By right-hand rule, positive theta_y gives slope d(u_z)/dx = -theta_y.
+        # Rotation theta_2 is about local 2-axis.
+        # By right-hand rule, positive theta_2 gives slope d(u_3)/dx1 = -theta_2.
         # Reference: Przemieniecki Eq. (5.58), Weaver & Gere Section 4.11
         # -------------------------------------------------------------
-        if Iy > 0.0:
-            factor_z = 1.0 + phi_z
-            k12_y = 12.0 * E * Iy / (L**3 * factor_z)
-            k6_y = 6.0 * E * Iy / (L**2 * factor_z)
-            k4_y = (4.0 + phi_z) * E * Iy / (L * factor_z)
-            k2_y = (2.0 - phi_z) * E * Iy / (L * factor_z)
+        if I2 > 0.0:
+            factor_3 = 1.0 + phi_3
+            k12_2 = 12.0 * E * I2 / (L**3 * factor_3)
+            k6_2 = 6.0 * E * I2 / (L**2 * factor_3)
+            k4_2 = (4.0 + phi_3) * E * I2 / (L * factor_3)
+            k2_2 = (2.0 - phi_3) * E * I2 / (L * factor_3)
 
-            k[2, 2] = k12_y
-            k[2, 4] = -k6_y
-            k[2, 8] = -k12_y
-            k[2, 10] = -k6_y
+            k[2, 2] = k12_2
+            k[2, 4] = -k6_2
+            k[2, 8] = -k12_2
+            k[2, 10] = -k6_2
 
-            k[4, 2] = -k6_y
-            k[4, 4] = k4_y
-            k[4, 8] = k6_y
-            k[4, 10] = k2_y
+            k[4, 2] = -k6_2
+            k[4, 4] = k4_2
+            k[4, 8] = k6_2
+            k[4, 10] = k2_2
 
-            k[8, 2] = -k12_y
-            k[8, 4] = k6_y
-            k[8, 8] = k12_y
-            k[8, 10] = k6_y
+            k[8, 2] = -k12_2
+            k[8, 4] = k6_2
+            k[8, 8] = k12_2
+            k[8, 10] = k6_2
 
-            k[10, 2] = -k6_y
-            k[10, 4] = k2_y
-            k[10, 8] = k6_y
+            k[10, 2] = -k6_2
+            k[10, 4] = k2_2
+            k[10, 8] = k6_2
             k[10, 11] = 0.0
-            k[10, 10] = k4_y
+            k[10, 10] = k4_2
 
         # Handle optional end releases if specified
         if self.releases_i is not None or self.releases_j is not None:
@@ -326,10 +328,10 @@ class FrameElement(ElementBase):
             m[8, 8] = m_half
 
             # Rotational lumped inertias
-            I_polar = self.Iy + self.Iz
+            I_polar = self.I2 + self.I3
             m[3, 3] = total_density * I_polar * L / 24.0
-            m[4, 4] = total_density * self.Iy * L / 24.0
-            m[5, 5] = total_density * self.Iz * L / 24.0
+            m[4, 4] = total_density * self.I2 * L / 24.0
+            m[5, 5] = total_density * self.I3 * L / 24.0
             m[9, 9] = m[3, 3]
             m[10, 10] = m[4, 4]
             m[11, 11] = m[5, 5]
@@ -344,14 +346,14 @@ class FrameElement(ElementBase):
         m[6, 6] = m_axial[1, 1]
 
         # 2. Torsional mass
-        I_p = self.Iy + self.Iz
+        I_p = self.I2 + self.I3
         m_torsion = (total_density * I_p * L / 6.0) * np.array([[2.0, 1.0], [1.0, 2.0]])
         m[3, 3] = m_torsion[0, 0]
         m[3, 9] = m_torsion[0, 1]
         m[9, 3] = m_torsion[1, 0]
         m[9, 9] = m_torsion[1, 1]
 
-        # 3. Bending mass in x-y plane (Iz)
+        # 3. Bending mass in 1-2 plane (I3)
         coef_z = m_total / 420.0
         m[1, 1] = coef_z * 156.0
         m[1, 5] = coef_z * 22.0 * L
@@ -373,7 +375,7 @@ class FrameElement(ElementBase):
         m[11, 7] = m[7, 11]
         m[11, 11] = coef_z * 4.0 * L**2
 
-        # 4. Bending mass in x-z plane (Iy)
+        # 4. Bending mass in 1-3 plane (I2)
         coef_y = m_total / 420.0
         m[2, 2] = coef_y * 156.0
         m[2, 4] = coef_y * -22.0 * L
@@ -425,7 +427,7 @@ class FrameElement(ElementBase):
         if abs(P) < 1e-12:
             return kg_local
 
-        # Transverse bending terms in x-y (dofs 1, 5, 7, 11)
+        # Transverse bending terms in 1-2 plane (dofs 1, 5, 7, 11)
         factor = P / (30.0 * L)
         kg_local[1, 1] = 36.0 * factor
         kg_local[1, 5] = 3.0 * L * factor
@@ -447,7 +449,7 @@ class FrameElement(ElementBase):
         kg_local[11, 7] = -3.0 * L * factor
         kg_local[11, 11] = 4.0 * L**2 * factor
 
-        # Transverse bending terms in x-z (dofs 2, 4, 8, 10)
+        # Transverse bending terms in 1-3 plane (dofs 2, 4, 8, 10)
         kg_local[2, 2] = 36.0 * factor
         kg_local[2, 4] = -3.0 * L * factor
         kg_local[2, 8] = -36.0 * factor
@@ -468,9 +470,9 @@ class FrameElement(ElementBase):
         kg_local[10, 8] = 3.0 * L * factor
         kg_local[10, 10] = 4.0 * L**2 * factor
 
-        # Torsional geometric stiffness (St. Venant approximation: P * (Iy+Iz)/A)
+        # Torsional geometric stiffness (St. Venant approximation: P * (I2+I3)/A)
         if self.area > 0.0:
-            I_p = self.Iy + self.Iz
+            I_p = self.I2 + self.I3
             r_g2 = I_p / self.area
             kg_local[3, 3] = (P * r_g2 / L)
             kg_local[3, 9] = -(P * r_g2 / L)
@@ -489,7 +491,7 @@ class FrameElement(ElementBase):
         -------
         numpy.ndarray
             Vector of 12 internal forces:
-            [fx_i, fy_i, fz_i, mx_i, my_i, mz_i, fx_j, fy_j, fz_j, mx_j, my_j, mz_j]
+            [f1_i, f2_i, f3_i, m1_i, m2_i, m3_i, f1_j, f2_j, f3_j, m1_j, m2_j, m3_j]
         """
         if self.structure is None or self.structure.disp is None:
             raise ValueError("Structure has not been solved yet.")
@@ -503,13 +505,13 @@ class FrameElement(ElementBase):
         Return the average axial force (compression positive).
         """
         f = self.get_local_forces()
-        # fx_i is tension if negative; fx_j is tension if positive
-        # Under compression, fx_i > 0 and fx_j < 0
+        # f1_i is tension if negative; f1_j is tension if positive
+        # Under compression, f1_i > 0 and f1_j < 0
         return float(f[0])
 
     def __repr__(self) -> str:
         return f"FrameElement(id={self.id}, nodes=({self.node_i.id}, {self.node_j.id}), L={self.length:.3f})"
 
 
-# Convenient alias
+# Convenient alias for 2D/ecosystem familiarity
 BeamElement = FrameElement

@@ -19,7 +19,7 @@ def test_struct_core_adapter_roundtrip():
     frame.add_node(1, 0.0, 0.0, 0.0)
     frame.add_node(2, 100.0, 0.0, 0.0)
 
-    frame.add_frame(1, 1, 2, E=29000.0, A=10.0, Iy=50.0, Iz=100.0, J=30.0)
+    frame.add_frame(1, 1, 2, E=29000.0, A=10.0, I2=50.0, I3=100.0, J=30.0)
     frame.add_support(1, [1, 1, 1, 1, 1, 1])
     frame.add_node_load(2, [10.0, 5.0, -2.0, 0.0, 0.0, 0.0])
 
@@ -29,6 +29,8 @@ def test_struct_core_adapter_roundtrip():
     sc_model = model_to_core(frame)
     assert len(sc_model.nodes) == 2
     assert len(sc_model.elements) == 1
+    assert sc_model.sections[0].I2 == 50.0
+    assert sc_model.sections[0].I3 == 100.0
 
     # Convert back from struct_core model
     rebuilt_struct = model_from_core(sc_model)
@@ -47,3 +49,4 @@ def test_struct_core_adapter_roundtrip():
     # Node 1 should have nonzero reactions (it's the fixed support).
     assert sc_result.node_results[1].reaction is not None
     assert sc_result.node_results[1].reaction.fx != 0.0
+    assert sc_result.element_results[1].forces[0].P != 0.0

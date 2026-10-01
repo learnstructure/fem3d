@@ -94,10 +94,12 @@ class Results:
 
         Columns:
         - 'element': Element identifier
-        - 'fx_i', 'fy_i', 'fz_i': Forces at start node i in local coords
-        - 'mx_i', 'my_i', 'mz_i': Moments at start node i in local coords
-        - 'fx_j', 'fy_j', 'fz_j': Forces at end node j in local coords
-        - 'mx_j', 'my_j', 'mz_j': Moments at end node j in local coords
+        - 'f1_i', 'f2_i', 'f3_i': Forces at start node i in local coords (1, 2, 3)
+        - 'm1_i', 'm2_i', 'm3_i': Moments at start node i in local coords (1, 2, 3)
+        - 'f1_j', 'f2_j', 'f3_j': Forces at end node j in local coords (1, 2, 3)
+        - 'm1_j', 'm2_j', 'm3_j': Moments at end node j in local coords (1, 2, 3)
+        - 'P_i', 'V2_i', 'V3_i', 'T_i', 'M2_i', 'M3_i'
+        - 'P_j', 'V2_j', 'V3_j', 'T_j', 'M2_j', 'M3_j'
         """
         if self.structure.disp is None:
             self.structure.solve()
@@ -108,18 +110,31 @@ class Results:
             data.append(
                 {
                     "element": el.id,
-                    "fx_i": f[0],
-                    "fy_i": f[1],
-                    "fz_i": f[2],
-                    "mx_i": f[3],
-                    "my_i": f[4],
-                    "mz_i": f[5],
-                    "fx_j": f[6],
-                    "fy_j": f[7],
-                    "fz_j": f[8],
-                    "mx_j": f[9],
-                    "my_j": f[10],
-                    "mz_j": f[11],
+                    "f1_i": f[0],
+                    "f2_i": f[1],
+                    "f3_i": f[2],
+                    "m1_i": f[3],
+                    "m2_i": f[4],
+                    "m3_i": f[5],
+                    "f1_j": f[6],
+                    "f2_j": f[7],
+                    "f3_j": f[8],
+                    "m1_j": f[9],
+                    "m2_j": f[10],
+                    "m3_j": f[11],
+                    # Standard engineering nomenclature
+                    "P_i": f[0],
+                    "V2_i": f[1],
+                    "V3_i": f[2],
+                    "T_i": f[3],
+                    "M2_i": f[4],
+                    "M3_i": f[5],
+                    "P_j": f[6],
+                    "V2_j": f[7],
+                    "V3_j": f[8],
+                    "T_j": f[9],
+                    "M2_j": f[10],
+                    "M3_j": f[11],
                 }
             )
         return pd.DataFrame(data)
@@ -174,9 +189,9 @@ class Results:
                 f"Element {el.id} ({type(el).__name__}): nodes=({el.node_i.id}, {el.node_j.id}), L={el.length:.4f}"
             )
             lines.append(f"  DOFs: {el.node_i.dofs + el.node_j.dofs}")
-            lines.append(f"  Orientation vx: {np.round(el.vx, 4)}")
-            lines.append(f"  Orientation vy: {np.round(el.vy, 4)}")
-            lines.append(f"  Orientation vz: {np.round(el.vz, 4)}")
+            lines.append(f"  Orientation v1: {np.round(el.v1, 4)}")
+            lines.append(f"  Orientation v2: {np.round(el.v2, 4)}")
+            lines.append(f"  Orientation v3: {np.round(el.v3, 4)}")
             lines.append("  Local Stiffness Matrix (12x12):")
             lines.append(self._format_array(el.local_stiffness()))
             lines.append("  Transformation Matrix (12x12):")

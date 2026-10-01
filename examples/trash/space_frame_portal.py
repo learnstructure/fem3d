@@ -42,26 +42,26 @@ def main():
     # Material & Section properties
     E = 29000.0  # ksi
     A_col = 15.0  # in^2
-    Iy_col = 100.0
-    Iz_col = 100.0
+    I2_col = 100.0
+    I3_col = 100.0
     J_col = 50.0
 
     A_beam = 12.0
-    Iy_beam = 80.0
-    Iz_beam = 250.0
+    I2_beam = 80.0
+    I3_beam = 250.0
     J_beam = 30.0
 
     # Add columns (vertical members)
-    frame.add_frame("C1", 1, 5, E, A_col, Iy_col, Iz_col, J_col)
-    frame.add_frame("C2", 2, 6, E, A_col, Iy_col, Iz_col, J_col)
-    frame.add_frame("C3", 3, 7, E, A_col, Iy_col, Iz_col, J_col)
-    frame.add_frame("C4", 4, 8, E, A_col, Iy_col, Iz_col, J_col)
+    frame.add_frame("C1", 1, 5, E, A_col, I2_col, I3_col, J_col)
+    frame.add_frame("C2", 2, 6, E, A_col, I2_col, I3_col, J_col)
+    frame.add_frame("C3", 3, 7, E, A_col, I2_col, I3_col, J_col)
+    frame.add_frame("C4", 4, 8, E, A_col, I2_col, I3_col, J_col)
 
     # Add roof beams
-    frame.add_frame("B1", 5, 6, E, A_beam, Iy_beam, Iz_beam, J_beam)
-    frame.add_frame("B2", 6, 7, E, A_beam, Iy_beam, Iz_beam, J_beam)
-    frame.add_frame("B3", 7, 8, E, A_beam, Iy_beam, Iz_beam, J_beam)
-    frame.add_frame("B4", 8, 5, E, A_beam, Iy_beam, Iz_beam, J_beam)
+    frame.add_frame("B1", 5, 6, E, A_beam, I2_beam, I3_beam, J_beam)
+    frame.add_frame("B2", 6, 7, E, A_beam, I2_beam, I3_beam, J_beam)
+    frame.add_frame("B3", 7, 8, E, A_beam, I2_beam, I3_beam, J_beam)
+    frame.add_frame("B4", 8, 5, E, A_beam, I2_beam, I3_beam, J_beam)
 
     # Fixed boundary supports at all 4 column bases
     for n in [1, 2, 3, 4]:

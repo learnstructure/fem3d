@@ -22,16 +22,16 @@ class SimpleFrame:
     Coordinate System & Orientation Overview
     -----------------------------------------
     - **Global system (X, Y, Z)**: Right-handed Cartesian triad where **+Z is vertical upward**.
-    - **Local axes (x', y', z')**:
-      - x' (vx): Centroidal axis directed from node_i to node_j.
-      - y' (vy): Cross-sectional axis. Resists bending in local x'-y' plane via Iz = ∫ y'^2 dA.
-      - z' (vz): Cross-sectional axis. Resists bending in local x'-z' plane via Iy = ∫ z'^2 dA.
+    - **Local axes (1, 2, 3)**:
+      - 1 (v1): Centroidal axis directed from node_i to node_j.
+      - 2 (v2): Cross-sectional axis. Resists bending in local 1-2 plane via I3 = ∫ x2^2 dA.
+      - 3 (v3): Cross-sectional axis. Resists bending in local 1-3 plane via I2 = ∫ x3^2 dA.
       - By default (roll_angle=0, web_vector=None):
-        - For horizontal/sloped members: vz is in the global XY horizontal plane,
-          and vy is in the vertical plane containing the member (pointing upward).
-        - For vertical members along +Z: vy points along global +Y, vz points along global -X.
-      - `roll_angle` (degrees): Rotates (vy, vz) about vx following right-hand rule.
-      - `web_vector`: Directs the local x'-y' plane toward a specific 3D direction (e.g. web plane).
+        - For horizontal/sloped members: v3 is in the global XY horizontal plane,
+          and v2 is in the vertical plane containing the member (pointing upward).
+        - For vertical members along +Z: v2 points along global +Y, v3 points along global -X.
+      - `roll_angle` (degrees): Rotates (v2, v3) about v1 following right-hand rule.
+      - `web_vector`: Directs the local 1-2 plane toward a specific 3D direction (e.g. web plane).
 
     Attributes
     ----------
@@ -80,8 +80,8 @@ class SimpleFrame:
         node_j_id: Union[int, str],
         E: float,
         A: float,
-        Iy: Optional[float] = None,
-        Iz: Optional[float] = None,
+        I2: Optional[float] = None,
+        I3: Optional[float] = None,
         J: Optional[float] = None,
         roll_angle: float = 0.0,
         web_vector: Optional[Iterable] = None,
@@ -104,19 +104,19 @@ class SimpleFrame:
             Young's modulus.
         A : float
             Cross-sectional area.
-        Iy : float, optional
-            Second moment of area about local y'-axis (resists bending in local x'-z' plane).
-            If omitted and Iz is given, set equal to Iz.
-        Iz : float, optional
-            Second moment of area about local z'-axis (resists bending in local x'-y' plane).
-            If omitted and Iy is given, set equal to Iy.
+        I2 : float, optional
+            Second moment of area about local 2-axis (resists bending in local 1-3 plane).
+            If omitted and I3 is given, set equal to I3.
+        I3 : float, optional
+            Second moment of area about local 3-axis (resists bending in local 1-2 plane).
+            If omitted and I2 is given, set equal to I2.
         J : float, optional
-            St. Venant torsional constant about local x'-axis. If omitted, approximated as Iy + Iz.
+            St. Venant torsional constant about local 1-axis. If omitted, approximated as I2 + I3.
         roll_angle : float, optional
-            Member roll angle in degrees about local x'-axis (vx).
-            Rotates the local (y', z') axes. Defaults to 0.0.
+            Member roll angle in degrees about local 1-axis (v1).
+            Rotates the local (2, 3) axes. Defaults to 0.0.
         web_vector : iterable, optional
-            Reference orientation vector pointing in the local x'-y' plane (e.g. web direction).
+            Reference orientation vector pointing in the local 1-2 plane (e.g. web direction / v2).
             If provided, overrides default orientation. Defaults to None.
         nu : float, optional
             Poisson's ratio. Defaults to 0.3.
@@ -133,28 +133,27 @@ class SimpleFrame:
         node_i = self.structure.nodes[node_i_id]
         node_j = self.structure.nodes[node_j_id]
 
-        # Handle flexibility in moment of inertia arguments
-        if Iz is None and Iy is not None:
-            Iz_val = float(Iy)
-            Iy_val = float(Iy)
-        elif Iy is None and Iz is not None:
-            Iy_val = float(Iz)
-            Iz_val = float(Iz)
-        elif Iy is None and Iz is None:
-            # Default zero or caller provided Section
-            Iy_val = 0.0
-            Iz_val = 0.0
+        i2_val = I2
+        i3_val = I3
+
+        if i3_val is None and i2_val is not None:
+            i3_val = float(i2_val)
+        elif i2_val is None and i3_val is not None:
+            i2_val = float(i3_val)
+        elif i2_val is None and i3_val is None:
+            i2_val = 0.0
+            i3_val = 0.0
         else:
-            Iy_val = float(Iy)
-            Iz_val = float(Iz)
+            i2_val = float(i2_val)
+            i3_val = float(i3_val)
 
         if J is None:
-            J_val = Iy_val + Iz_val if (Iy_val + Iz_val) > 0 else 0.0
+            J_val = i2_val + i3_val if (i2_val + i3_val) > 0 else 0.0
         else:
             J_val = float(J)
 
         mat = ElasticMaterial(E=E, nu=nu, G=G)
-        sec = Section(A=A, Iy=Iy_val, Iz=Iz_val, J=J_val)
+        sec = Section(A=A, I2=i2_val, I3=i3_val, J=J_val)
 
         elem = FrameElement(
             eid=id,
@@ -295,19 +294,25 @@ class SimpleFrame:
     def add_distributed_load(
         self,
         element_id: Union[int, str],
-        wx: float = 0.0,
-        wy: float = 0.0,
-        wz: float = 0.0,
+        w1: float = 0.0,
+        w2: float = 0.0,
+        w3: float = 0.0,
         coord_system: str = "local",
+        wx: Optional[float] = None,
+        wy: Optional[float] = None,
+        wz: Optional[float] = None,
     ) -> DistributedLoad:
         """Apply uniformly distributed load along an element."""
         element = self.structure.elements[element_id]
         dload = DistributedLoad(
             element=element,
+            w1=w1,
+            w2=w2,
+            w3=w3,
+            coord_system=coord_system,
             wx=wx,
             wy=wy,
             wz=wz,
-            coord_system=coord_system,
         )
         self.structure.add_load(dload)
         return dload
@@ -315,27 +320,39 @@ class SimpleFrame:
     def add_element_point_load(
         self,
         element_id: Union[int, str],
-        px: float = 0.0,
-        py: float = 0.0,
-        pz: float = 0.0,
-        mx: float = 0.0,
-        my: float = 0.0,
-        mz: float = 0.0,
+        p1: float = 0.0,
+        p2: float = 0.0,
+        p3: float = 0.0,
+        m1: float = 0.0,
+        m2: float = 0.0,
+        m3: float = 0.0,
         x: float = 0.0,
         coord_system: str = "local",
+        px: Optional[float] = None,
+        py: Optional[float] = None,
+        pz: Optional[float] = None,
+        mx: Optional[float] = None,
+        my: Optional[float] = None,
+        mz: Optional[float] = None,
     ) -> ElementPointLoad:
         """Apply concentrated point load acting at distance x along an element."""
         element = self.structure.elements[element_id]
         pload = ElementPointLoad(
             element=element,
+            p1=p1,
+            p2=p2,
+            p3=p3,
+            m1=m1,
+            m2=m2,
+            m3=m3,
+            x=x,
+            coord_system=coord_system,
             px=px,
             py=py,
             pz=pz,
             mx=mx,
             my=my,
             mz=mz,
-            x=x,
-            coord_system=coord_system,
         )
         self.structure.add_load(pload)
         return pload

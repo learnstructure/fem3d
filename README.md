@@ -159,27 +159,27 @@ Support fixity list format: `[ux, uy, uz, rx, ry, rz]` where `1` (or `True`) = f
 
 ## Local Axes & Orientation
 
-### Default Local Axes Convention
+### Local Axes Convention (1, 2, 3)
 
-For each element, the local coordinate triad $(\vec{v}_{x'}, \vec{v}_{y'}, \vec{v}_{z'})$ is a right-handed orthogonal system:
+For each element, the local coordinate triad $(\vec{v}_1, \vec{v}_2, \vec{v}_3)$ is a right-handed orthogonal system:
 
-- **$\vec{v}_{x'}$** — directed along the member centroidal axis from node $i$ to node $j$:
-  $$\vec{v}_{x'} = \frac{1}{L}(x_j - x_i,\; y_j - y_i,\; z_j - z_i)^T$$
+- **$\vec{v}_1$ (Local Axis 1 — Longitudinal / Axial):** directed along the member centroidal axis from node $i$ to node $j$:
+  $$\vec{v}_1 = \frac{1}{L}(x_j - x_i,\; y_j - y_i,\; z_j - z_i)^T$$
 
-- **$\vec{v}_{y'}$** — cross-section axis in the local triad. Associated with bending in the local $x'$-$y'$ plane (governed by $I_z$, deflection $u_y$, rotation $\theta_z$).
+- **$\vec{v}_2$ (Local Axis 2 — Transverse / Web / Depth):** cross-section axis in the local triad. Associated with bending in the local 1-2 plane (governed by $I_3$, deflection $u_2$, rotation $\theta_3$).
 
-- **$\vec{v}_{z'}$** — cross-section axis such that $\vec{v}_{z'} = \vec{v}_{x'} \times \vec{v}_{y'}$. Associated with bending in the local $x'$-$z'$ plane (governed by $I_y$, deflection $u_z$, rotation $\theta_y$).
+- **$\vec{v}_3$ (Local Axis 3 — Transverse / Flange / Width):** cross-section axis such that $\vec{v}_3 = \vec{v}_1 \times \vec{v}_2$. Associated with bending in the local 1-3 plane (governed by $I_2$, deflection $u_3$, rotation $\theta_2$).
 
 ### Default Automatic Orientation
 
 For **non-vertical members** (member axis not parallel to global Z):
-$$\vec{v}_{z'} = \frac{\vec{v}_{x'} \times [0, 0, 1]}{|\vec{v}_{x'} \times [0, 0, 1]|}, \quad \vec{v}_{y'} = \vec{v}_{z'} \times \vec{v}_{x'}$$
+$$\vec{v}_3 = \frac{\vec{v}_1 \times [0, 0, 1]}{|\vec{v}_1 \times [0, 0, 1]|}, \quad \vec{v}_2 = \vec{v}_3 \times \vec{v}_1$$
 
-This places $\vec{v}_{z'}$ in the horizontal plane and $\vec{v}_{y'}$ as close to vertical as possible.
+This places $\vec{v}_3$ in the horizontal plane and $\vec{v}_2$ as close to vertical as possible (oriented with the web vertical).
 
 For **vertical members** (member axis parallel to global Z):
-- Member pointing +Z: $\vec{v}_{y'} = [0, 1, 0]$, $\vec{v}_{z'} = [-1, 0, 0]$
-- Member pointing −Z: $\vec{v}_{y'} = [0, -1, 0]$, $\vec{v}_{z'} = [-1, 0, 0]$
+- Member pointing +Z: $\vec{v}_2 = [0, 1, 0]$, $\vec{v}_3 = [-1, 0, 0]$
+- Member pointing −Z: $\vec{v}_2 = [0, -1, 0]$, $\vec{v}_3 = [-1, 0, 0]$
 
 ### Horizontal Member Example
 
@@ -187,27 +187,25 @@ For a beam along **global X** (node i at origin, node j along +X):
 
 | Local axis | Global direction |
 |-----------|-----------------|
-| $\vec{v}_{x'}$ | $+X$ (along member) |
-| $\vec{v}_{y'}$ | $+Z$ (upward vertical) |
-| $\vec{v}_{z'}$ | $-Y$ |
+| $\vec{v}_1$ (axial) | $+X$ (along member) |
+| $\vec{v}_2$ (web / depth) | $+Z$ (upward vertical) |
+| $\vec{v}_3$ (flange / width) | $-Y$ |
 
 This means:
-- A **global Y load** at a node maps to local $z'$ → bending uses $EI_y$
-- A **global Z load** at a node maps to local $y'$ → bending uses $EI_z$
-
-> **⚠️ Verify:** The mapping of loads to bending axes depends on the local axes orientation. Always verify calculated deflections against your textbook using the actual rotation matrix $R$ for your problem.
+- A **global Y load** at a node maps to local 3 → bending about axis 2 uses $E I_2$
+- A **global Z load** at a node maps to local 2 → bending about axis 3 uses $E I_3$
 
 ### User-Specified Orientation
 
 Override the automatic orientation with:
 
-- **Roll angle** `roll_angle` (degrees): rotates the local $y'$-$z'$ plane about $\vec{v}_{x'}$.
-- **Web vector** `web_vector` (3D array): explicit reference vector.
+- **Roll angle** `roll_angle` (degrees): rotates the local 2-3 plane about $\vec{v}_1$.
+- **Web vector** `web_vector` (3D array): explicit reference vector pointing in the local 1-2 plane (direction of axis 2).
 
 ### Coordinate Transformation
 
 The $3 \times 3$ direction cosine matrix $R$:
-$$R = \begin{bmatrix} \vec{v}_{x'}^T \\ \vec{v}_{y'}^T \\ \vec{v}_{z'}^T \end{bmatrix}$$
+$$R = \begin{bmatrix} \vec{v}_1^T \\ \vec{v}_2^T \\ \vec{v}_3^T \end{bmatrix}$$
 
 The $12 \times 12$ global-to-local transformation matrix:
 $$T = \text{diag}(R, R, R, R)$$
@@ -225,36 +223,36 @@ $$K_{global} = T^T \; K_{local} \; T$$
 
 The $12 \times 12$ local stiffness matrix has four uncoupled blocks:
 
-#### 1. Axial (DOFs 0, 6 — $u_{x1}, u_{x2}$)
+#### 1. Axial (DOFs 0, 6 — $u_{1i}, u_{1j}$)
 
 $$K_{axial} = \frac{EA}{L} \begin{bmatrix} 1 & -1 \\ -1 & 1 \end{bmatrix}$$
 
-#### 2. Torsion (DOFs 3, 9 — $\theta_{x1}, \theta_{x2}$)
+#### 2. Torsion (DOFs 3, 9 — $\theta_{1i}, \theta_{1j}$)
 
 $$K_{torsion} = \frac{GJ}{L} \begin{bmatrix} 1 & -1 \\ -1 & 1 \end{bmatrix}$$
 
 where $G = E / [2(1+\nu)]$.
 
-#### 3. Bending in $x'$-$y'$ plane — $EI_z$ block (DOFs 1, 5, 7, 11 — $u_{y1}, \theta_{z1}, u_{y2}, \theta_{z2}$)
+#### 3. Bending in 1-2 plane about local axis 3 — $EI_3$ block (DOFs 1, 5, 7, 11 — $u_{2i}, \theta_{3i}, u_{2j}, \theta_{3j}$)
 
-Sign convention: slope $du_y/dx = +\theta_z$ (right-hand rule about local $z'$).
+Sign convention: slope $du_2/dx_1 = +\theta_3$ (right-hand rule about local axis 3).
 
-$$K_{y} = \begin{bmatrix}
-\frac{12EI_z}{L^3} & \frac{6EI_z}{L^2} & -\frac{12EI_z}{L^3} & \frac{6EI_z}{L^2} \\
-\frac{6EI_z}{L^2} & \frac{4EI_z}{L} & -\frac{6EI_z}{L^2} & \frac{2EI_z}{L} \\
--\frac{12EI_z}{L^3} & -\frac{6EI_z}{L^2} & \frac{12EI_z}{L^3} & -\frac{6EI_z}{L^2} \\
-\frac{6EI_z}{L^2} & \frac{2EI_z}{L} & -\frac{6EI_z}{L^2} & \frac{4EI_z}{L}
+$$K_{3} = \begin{bmatrix}
+\frac{12EI_3}{L^3} & \frac{6EI_3}{L^2} & -\frac{12EI_3}{L^3} & \frac{6EI_3}{L^2} \\
+\frac{6EI_3}{L^2} & \frac{4EI_3}{L} & -\frac{6EI_3}{L^2} & \frac{2EI_3}{L} \\
+-\frac{12EI_3}{L^3} & -\frac{6EI_3}{L^2} & \frac{12EI_3}{L^3} & -\frac{6EI_3}{L^2} \\
+\frac{6EI_3}{L^2} & \frac{2EI_3}{L} & -\frac{6EI_3}{L^2} & \frac{4EI_3}{L}
 \end{bmatrix}$$
 
-#### 4. Bending in $x'$-$z'$ plane — $EI_y$ block (DOFs 2, 4, 8, 10 — $u_{z1}, \theta_{y1}, u_{z2}, \theta_{y2}$)
+#### 4. Bending in 1-3 plane about local axis 2 — $EI_2$ block (DOFs 2, 4, 8, 10 — $u_{3i}, \theta_{2i}, u_{3j}, \theta_{2j}$)
 
-Sign convention: slope $du_z/dx = -\theta_y$ (right-hand rule about local $y'$; **note the sign flip** relative to the $y$-bending block).
+Sign convention: slope $du_3/dx_1 = -\theta_2$ (right-hand rule about local axis 2; **note the sign flip** relative to the axis 3 bending block).
 
-$$K_{z} = \begin{bmatrix}
-\frac{12EI_y}{L^3} & -\frac{6EI_y}{L^2} & -\frac{12EI_y}{L^3} & -\frac{6EI_y}{L^2} \\
--\frac{6EI_y}{L^2} & \frac{4EI_y}{L} & \frac{6EI_y}{L^2} & \frac{2EI_y}{L} \\
--\frac{12EI_y}{L^3} & \frac{6EI_y}{L^2} & \frac{12EI_y}{L^3} & \frac{6EI_y}{L^2} \\
--\frac{6EI_y}{L^2} & \frac{2EI_y}{L} & \frac{6EI_y}{L^2} & \frac{4EI_y}{L}
+$$K_{2} = \begin{bmatrix}
+\frac{12EI_2}{L^3} & -\frac{6EI_2}{L^2} & -\frac{12EI_2}{L^3} & -\frac{6EI_2}{L^2} \\
+-\frac{6EI_2}{L^2} & \frac{4EI_2}{L} & \frac{6EI_2}{L^2} & \frac{2EI_2}{L} \\
+-\frac{12EI_2}{L^3} & \frac{6EI_2}{L^2} & \frac{12EI_2}{L^3} & \frac{6EI_2}{L^2} \\
+-\frac{6EI_2}{L^2} & \frac{2EI_2}{L} & \frac{6EI_2}{L^2} & \frac{4EI_2}{L}
 \end{bmatrix}$$
 
 *References: Przemieniecki (1968), Eq. 5.58; Weaver & Gere (1990), Sec. 4.11; McGuire et al. (2000), Sec. 5.1.*
@@ -293,13 +291,13 @@ fem3d/
 │   │   ├── material.py        # Abstract MaterialBase
 │   │   └── elastic.py         # ElasticMaterial (E, nu, G, rho)
 │   ├── sections/
-│   │   └── section.py         # Section (A, Iy, Iz, J) with factory methods
+│   │   └── section.py         # Section (A, I2, I3, J) with factory methods
 │   ├── elements/
-│   │   ├── element.py         # ElementBase (geometry, local axes, T matrix)
-│   │   ├── frame.py           # FrameElement (12x12 K, M, Kg)
+│   │   ├── element.py         # ElementBase (geometry, local axes v1, v2, v3, T matrix)
+│   │   ├── frame.py           # FrameElement (12x12 K, M, Kg with I2, I3)
 │   │   ├── truss.py           # TrussElement (axial only)
 │   │   └── spring.py          # SpringElement (diagonal 12x12)
-│   ├── loads.py               # PointLoad, DistributedLoad, ElementPointLoad
+│   ├── loads.py               # PointLoad, DistributedLoad (w1, w2, w3), ElementPointLoad
 │   ├── structure.py           # Structure: assembly, BCs, linear solver, modal
 │   ├── results.py             # Results: DataFrames + text report
 │   ├── buckling_analysis.py   # Linear elastic buckling
@@ -309,9 +307,8 @@ fem3d/
 │       └── struct_core_adapter.py  # struct_core bidirectional adapter
 ├── examples/
 │   └── linear/
-│       ├── cantilever_3d.py
-│       ├── space_frame_portal.py
-│       └── space_truss.py
+│       ├── frame_58.py
+│       └── frame_84.py
 └── tests/
     ├── conftest.py
     ├── test_frame_3d.py
@@ -361,7 +358,7 @@ print(steel.G)  # 11153.8 ksi
 ```python
 from fem3d import Section
 
-sec = Section(A=10.0, Iy=50.0, Iz=200.0, J=30.0)
+sec = Section(A=10.0, I2=50.0, I3=200.0, J=30.0)
 
 # Factory methods:
 sec = Section.from_rectangle(width=4.0, depth=8.0)
@@ -389,7 +386,7 @@ n1.set_support([1, 1, 1, 1, 1, 1])   # fixed base
 
 # Add element
 mat = ElasticMaterial(E=29000.0)
-sec = Section(A=14.7, Iy=272.0, Iz=984.0, J=3.01)
+sec = Section(A=14.7, I2=272.0, I3=984.0, J=3.01)
 el = FrameElement(1, n1, n2, mat, sec)
 s.add_element(el)
 
@@ -419,9 +416,9 @@ frame.add_node(1, 0.0, 0.0, 0.0)
 frame.add_node(2, 0.0, 0.0, 120.0)
 frame.add_node(3, 120.0, 0.0, 120.0)
 
-# Frame elements: (id, node_i, node_j, E, A, Iy, Iz, J)
-frame.add_frame(1, 1, 2, E=29000, A=14.7, Iy=272, Iz=984, J=3.01)
-frame.add_frame(2, 2, 3, E=29000, A=10.0, Iy=100, Iz=300, J=2.0, roll_angle=0.0)
+# Frame elements: (id, node_i, node_j, E, A, I2, I3, J)
+frame.add_frame(1, 1, 2, E=29000, A=14.7, I2=272, I3=984, J=3.01)
+frame.add_frame(2, 2, 3, E=29000, A=10.0, I2=100, I3=300, J=2.0, roll_angle=0.0)
 
 # Truss elements: (id, node_i, node_j, E, A)
 frame.add_truss(3, 1, 3, E=29000, A=5.0)
@@ -435,9 +432,9 @@ frame.add_support(1, [1, 1, 1, 1, 1, 1])   # fixed
 # Nodal loads: (node_id, [Fx, Fy, Fz, Mx, My, Mz])
 frame.add_node_load(3, [10.0, 0.0, -5.0, 0.0, 0.0, 0.0])
 
-# Distributed loads: (elem_id, wx=0, wy=0, wz=0)
-# wx, wy, wz are in local element coordinates
-frame.add_distributed_load(2, wz=-0.5)   # uniform load along local z'
+# Distributed loads: (elem_id, w1=0, w2=0, w3=0)
+# w1, w2, w3 are in local element coordinates
+frame.add_distributed_load(2, w3=-0.5)   # uniform load along local 3
 
 # Solve
 disp, reactions = frame.solve()
@@ -458,7 +455,7 @@ results.create_report()
 
 | Factory method | Shape | Parameters |
 |---------------|-------|------------|
-| `Section(A, Iy, Iz, J)` | Generic | Explicit values |
+| `Section(A, I2, I3, J)` | Generic | Explicit values |
 | `Section.from_rectangle(width, depth)` | Solid rectangle | $b \times h$ |
 | `Section.from_circle(diameter)` | Solid circle | $d$ |
 | `Section.from_pipe(outer_d, thickness)` | Hollow circle | $D_o$, $t$ |
@@ -466,10 +463,8 @@ results.create_report()
 | `Section.from_i_shape(bf, tf, d, tw)` | I-beam / W-shape | flange & web dims |
 
 **Moments of Inertia Convention:**
-- $I_y$ = second moment of area about the local **y'-axis** ($I_y = \int z'^2 dA$), resisting flexure in the local $x'$-$z'$ plane.
-- $I_z$ = second moment of area about the local **z'-axis** ($I_z = \int y'^2 dA$), resisting flexure in the local $x'$-$y'$ plane.
-
-*Note:* Neither $I_y$ nor $I_z$ is labeled generically as "strong" or "weak"; which axis provides higher flexural stiffness depends on the cross-section dimensions and orientation (roll angle).
+- $I_3$ = second moment of area about the local **3-axis** ($I_3 = \int x_2^2 dA$), resisting flexure in the local 1-2 plane (depth / major axis in standard orientation).
+- $I_2$ = second moment of area about the local **2-axis** ($I_2 = \int x_3^2 dA$), resisting flexure in the local 1-3 plane (width / minor axis in standard orientation).
 
 ---
 
@@ -487,11 +482,11 @@ structure.add_load(load)
 
 ### `DistributedLoad`
 
-Uniformly distributed load along an element **in local element coordinates**:
+Uniformly distributed load along an element **in local element coordinates** ($w_1, w_2, w_3$) or global coordinates ($w_X, w_Y, w_Z$):
 
 ```python
 from fem3d import DistributedLoad
-load = DistributedLoad(element, wx=0.0, wy=0.0, wz=-0.5)
+load = DistributedLoad(element, w1=0.0, w2=0.0, w3=-0.5)
 structure.add_load(load)
 ```
 
@@ -499,9 +494,9 @@ Fixed-end equivalent nodal forces (exact for uniform load, Euler-Bernoulli):
 
 | Direction | Shear reactions | End moments |
 |-----------|----------------|-------------|
-| $w_y$ (local $y'$) | $\pm w_y L / 2$ | $\pm w_y L^2 / 12$ about local $z'$ |
-| $w_z$ (local $z'$) | $\pm w_z L / 2$ | $\mp w_z L^2 / 12$ about local $y'$ |
-| $w_x$ (local $x'$) | $\pm w_x L / 2$ | none |
+| $w_2$ (local 2) | $\pm w_2 L / 2$ | $\pm w_2 L^2 / 12$ about local axis 3 |
+| $w_3$ (local 3) | $\pm w_3 L / 2$ | $\mp w_3 L^2 / 12$ about local axis 2 |
+| $w_1$ (local 1) | $\pm w_1 L / 2$ | none |
 
 Loads are transformed to global DOFs via the element's $T$ matrix.
 
@@ -511,7 +506,7 @@ Concentrated load at a point along an element at local position $x$ (in element 
 
 ```python
 from fem3d import ElementPointLoad
-load = ElementPointLoad(element, px=0.0, py=-5.0, pz=0.0, mx=0.0, my=0.0, mz=0.0, x=60.0)
+load = ElementPointLoad(element, p1=0.0, p2=-5.0, p3=0.0, m1=0.0, m2=0.0, m3=0.0, x=60.0)
 ```
 
 ---
@@ -531,9 +526,13 @@ df_reac = results.reactions()
 
 # Element internal forces — pandas DataFrame (local coordinates)
 df_forces = results.element_forces()
-# Columns: ['element', 'fx_i', 'fy_i', 'fz_i', 'mx_i', 'my_i', 'mz_i',
-#                       'fx_j', 'fy_j', 'fz_j', 'mx_j', 'my_j', 'mz_j']
-# where i = start node end, j = end node end (local coordinates)
+# Primary local force columns:
+#   ['f1_i', 'f2_i', 'f3_i', 'm1_i', 'm2_i', 'm3_i',
+#    'f1_j', 'f2_j', 'f3_j', 'm1_j', 'm2_j', 'm3_j']
+# Engineering nomenclature columns:
+#   ['P_i', 'V2_i', 'V3_i', 'T_i', 'M2_i', 'M3_i',
+#    'P_j', 'V2_j', 'V3_j', 'T_j', 'M2_j', 'M3_j']
+# where i = start node end, j = end node end
 
 # Full formatted text report
 results.create_report(print_report=True)
@@ -541,14 +540,14 @@ results.create_report(print_report=True)
 
 **Element forces sign convention (local coordinates):**
 
-| Symbol | Meaning (positive) |
-|--------|--------------------|
-| $P = fx_i$ | Axial tension at start end |
-| $V_y = fy_i$ | Shear in local $y'$ at start end |
-| $V_z = fz_i$ | Shear in local $z'$ at start end |
-| $T = mx_i$ | Torsional moment at start end |
-| $M_y = my_i$ | Bending moment about local $y'$ at start end |
-| $M_z = mz_i$ | Bending moment about local $z'$ at start end |
+| Symbol | Primary Column | Meaning (positive) |
+|--------|---------------|--------------------|
+| $P$ | `f1_i` / `P_i` | Axial tension at start end |
+| $V_2$ | `f2_i` / `V2_i` | Shear along local 2 at start end |
+| $V_3$ | `f3_i` / `V3_i` | Shear along local 3 at start end |
+| $T$ | `m1_i` / `T_i` | Torsional moment about local 1 at start end |
+| $M_2$ | `m2_i` / `M2_i` | Bending moment about local 2 at start end |
+| $M_3$ | `m3_i` / `M3_i` | Bending moment about local 3 at start end |
 
 ---
 
@@ -625,7 +624,7 @@ frame = SimpleFrame()
 frame.add_node(1, 0, 0, 0)
 frame.add_node(2, 120, 0, 0)   # 10-ft beam along global X
 
-frame.add_frame(1, 1, 2, E=29000, A=14.7, Iy=272, Iz=984, J=15.0)
+frame.add_frame(1, 1, 2, E=29000, A=14.7, I2=272, I3=984, J=15.0)
 frame.add_support(1, [1, 1, 1, 1, 1, 1])   # fixed base
 
 # Combined loads at tip
@@ -670,7 +669,7 @@ for i in range(5):
 frame.add_support(1, [1, 1, 1, 1, 1, 1])
 
 for i in range(4):
-    frame.add_frame(i+1, i+1, i+2, E=29000, A=14.7, Iy=272, Iz=984, J=3.0)
+    frame.add_frame(i+1, i+1, i+2, E=29000, A=14.7, I2=272, I3=984, J=3.0)
     # Set lumped mass at each node
     frame.structure.nodes[i+2].set_mass(mass=0.005)
 
@@ -733,6 +732,24 @@ The stiffness matrices, mass matrices, and transformation procedures in `fem3d` 
 
 ---
 
+## Ecosystem Integration with `struct_core`
+
+`fem3d` provides bidirectional adapters to `struct_core` for 3D frames:
+
+```python
+from fem3d.adapters import model_from_core, model_to_core, result_to_core
+
+# 1. Build a 3D fem3d.Structure from a struct_core.StructuralModel or Project
+# Supports individual load cases or factored load combinations
+structure = model_from_core(project, load_case_id="Gravity", load_combination_id="COMB_1.2D+1.6L")
+structure.solve()
+
+# 2. Export 3D analysis results to struct_core.AnalysisResult
+analysis_result = result_to_core(structure, analysis_case_id="Static_3D")
+```
+
+---
+
 ## Running Tests
 
 ```bash
@@ -741,4 +758,5 @@ cd fem3d
 pytest -v
 ```
 
-All 12 tests should pass. Tests marked with `# TODO` contain commented assertions pending textbook verification.
+All 20 tests pass cleanly.
+

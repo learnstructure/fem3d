@@ -50,9 +50,9 @@ def hermite_cubic_3d(el: FrameElement, u_i_glob: np.ndarray, u_j_glob: np.ndarra
     u_loc = (1.0 - xi) * d_i_trans_loc[0] + xi * d_j_trans_loc[0]
 
     # Local transverse deflections
-    # y' deflection bending with rotation theta_z'
+    # Local axis 2 deflection (bending in 1-2 plane with rotation theta_3)
     v_loc = N1 * d_i_trans_loc[1] + N2 * d_i_rot_loc[2] + N3 * d_j_trans_loc[1] + N4 * d_j_rot_loc[2]
-    # z' deflection bending with rotation theta_y' (right-hand rule slope: dw/dx = -theta_y)
+    # Local axis 3 deflection (bending in 1-3 plane with rotation theta_2; slope dw/dx1 = -theta_2)
     w_loc = N1 * d_i_trans_loc[2] - N2 * d_i_rot_loc[1] + N3 * d_j_trans_loc[2] - N4 * d_j_rot_loc[1]
 
     # Combine local deflections: shape (3, n_points)

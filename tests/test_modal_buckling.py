@@ -28,10 +28,10 @@ def test_modal_analysis_cantilever():
     mat = ElasticMaterial(E=E, rho=rho)
 
     A = 10.0
-    Iy = 80.0
-    Iz = 200.0
+    I2 = 80.0
+    I3 = 200.0
     J = 50.0
-    sec = Section(A=A, Iy=Iy, Iz=Iz, J=J)
+    sec = Section(A=A, I2=I2, I3=I3, J=J)
 
     elem = FrameElement(1, n1, n2, material=mat, section=sec)
     struct.add_element(elem)
@@ -44,9 +44,9 @@ def test_modal_analysis_cantilever():
     assert len(frequencies) > 0
     assert frequencies[0] > 0.0
 
-    # Theoretical frequency for weak axis bending (Iy = 80):
+    # Theoretical frequency for weak axis bending (I2 = 80):
     L = 120.0
-    f_theory_y = ((1.875104**2) / (2.0 * math.pi * (L**2))) * math.sqrt((E * Iy) / (rho * A))
+    f_theory_y = ((1.875104**2) / (2.0 * math.pi * (L**2))) * math.sqrt((E * I2) / (rho * A))
 
     # Our single-element discretization with consistent mass matches within a few percent
     # (typically within ~5% for a single cubic beam element)
@@ -69,10 +69,10 @@ def test_buckling_analysis_cantilever():
 
     E = 29000.0
     A = 10.0
-    Iy = 50.0   # weak axis
-    Iz = 150.0  # strong axis
+    I2 = 50.0   # weak axis
+    I3 = 150.0  # strong axis
     J = 30.0
-    sec = Section(A=A, Iy=Iy, Iz=Iz, J=J)
+    sec = Section(A=A, I2=I2, I3=I3, J=J)
     mat = ElasticMaterial(E=E)
 
     elem = FrameElement(1, n1, n2, material=mat, section=sec)
@@ -87,9 +87,9 @@ def test_buckling_analysis_cantilever():
     factors, modes = buckling_analysis(struct, num_modes=1)
     P_cr_fem = factors[0] * P_ref
 
-    # Theoretical Euler buckling load for weak axis (Iy):
+    # Theoretical Euler buckling load for weak axis (I2):
     L = 100.0
-    P_cr_exact = (math.pi**2) * E * Iy / (4.0 * (L**2))
+    P_cr_exact = (math.pi**2) * E * I2 / (4.0 * (L**2))
 
     # Single-element cubic formulation approximates Euler load within ~3%
     rel_error = abs(P_cr_fem - P_cr_exact) / P_cr_exact
