@@ -493,11 +493,14 @@ class FrameElement(ElementBase):
             Vector of 12 internal forces:
             [f1_i, f2_i, f3_i, m1_i, m2_i, m3_i, f1_j, f2_j, f3_j, m1_j, m2_j, m3_j]
         """
+        if hasattr(self, "f_local") and self.f_local is not None:
+            return self.f_local
         if self.structure is None or self.structure.disp is None:
             raise ValueError("Structure has not been solved yet.")
         u_local = self.get_local_displacements(self.structure.disp)
         k_local = self.local_stiffness()
         f_local = k_local @ u_local - self.eq_load_local
+        self.f_local = f_local
         return f_local
 
     def axial_force(self) -> float:

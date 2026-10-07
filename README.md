@@ -740,8 +740,14 @@ The stiffness matrices, mass matrices, and transformation procedures in `fem3d` 
 from fem3d.adapters import model_from_core, model_to_core, result_to_core
 
 # 1. Build a 3D fem3d.Structure from a struct_core.StructuralModel or Project
-# Supports individual load cases or factored load combinations
-structure = model_from_core(project, load_case_id="Gravity", load_combination_id="COMB_1.2D+1.6L")
+# Automatically computes member self-weight line loads via struct_load for cases
+# with include_self_weight=True (e.g. DEAD). Supports load cases or combinations.
+structure = model_from_core(
+    project,
+    load_case_id="DEAD",
+    load_combination_id="COMB_1.2D+1.6L",
+    include_self_weight=True,
+)
 structure.solve()
 
 # 2. Export 3D analysis results to struct_core.AnalysisResult
@@ -758,5 +764,5 @@ cd fem3d
 pytest -v
 ```
 
-All 20 tests pass cleanly.
+All 28 tests pass cleanly.
 

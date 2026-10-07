@@ -291,3 +291,51 @@ class ElementBase:
         Subclasses must implement or specialize.
         """
         raise NotImplementedError
+
+    def update_state(self, global_disp: np.ndarray):
+        """
+        Update internal element forces and state from the global displacement vector.
+
+        Parameters
+        ----------
+        global_disp : numpy.ndarray
+            Full global displacement vector of the structure.
+        """
+        u_i = global_disp[self.node_i.dofs]
+        u_j = global_disp[self.node_j.dofs]
+        u_global = np.concatenate([u_i, u_j])
+        k_global = self.global_stiffness()
+        f_global = k_global @ u_global
+        if hasattr(self, "eq_load") and self.eq_load is not None:
+            f_global = f_global - self.eq_load
+
+        self.k_local = self.local_stiffness() if hasattr(self, "local_stiffness") else None
+        self.K_global = k_global
+        self.F_global = f_global
+        T = self.transformation_matrix(dof_per_node=len(u_i))
+        self.f_local = T @ f_global
+
+    def get_tangent_stiffness(self) -> np.ndarray:
+        """Return the global tangent stiffness matrix of the element."""
+        if hasattr(self, "K_global") and self.K_global is not None:
+            return self.K_global
+        return self.global_stiffness()
+
+    def get_internal_forces(self) -> np.ndarray:
+        """Return the global internal resisting force vector of the element."""
+        if hasattr(self, "F_global") and self.F_global is not None:
+            return self.F_global
+        if (
+            hasattr(self, "structure")
+            and self.structure is not None
+            and getattr(self.structure, "disp", None) is not None
+        ):
+            self.update_state(self.structure.disp)
+            return self.F_global
+        num_dofs = (
+            len(self.node_i.dofs) + len(self.node_j.dofs)
+            if hasattr(self.node_i, "dofs") and self.node_i.dofs
+            else 12
+        )
+        return np.zeros(num_dofs, dtype=float)
+

@@ -50,3 +50,66 @@ def test_struct_core_adapter_roundtrip():
     assert sc_result.node_results[1].reaction is not None
     assert sc_result.node_results[1].reaction.fx != 0.0
     assert sc_result.element_results[1].forces[0].P != 0.0
+
+
+@pytest.mark.skipif(not HAS_STRUCT_CORE, reason="struct_core not installed")
+def test_model_from_core_with_self_weight():
+    from struct_core import (
+        StructuralModel,
+        Node,
+        Support,
+        ElasticMaterial,
+        RectangularSection,
+        BeamElement,
+        LoadCase,
+        LoadCombination,
+        LoadCaseFactor,
+    )
+
+    nodes = [
+        Node(id=1, x=0.0, y=0.0, z=0.0),
+        Node(id=2, x=10.0, y=0.0, z=0.0),
+    ]
+    mat = ElasticMaterial(id="Conc", E=3e7, rho=2400.0)
+    sec = RectangularSection(id="B1", b=0.5, h=1.0)
+    elements = [
+        BeamElement(id=1, start_node=1, end_node=2, material_id="Conc", section_id="B1"),
+    ]
+    supports = [Support.fixed_3d(node_id=1)]
+    lc_dead = LoadCase(id="DEAD", name="Dead Load", include_self_weight=True)
+    comb_14d = LoadCombination(
+        id="1.4D",
+        factors=[LoadCaseFactor(load_case_id="DEAD", factor=1.4)],
+    )
+
+    model = StructuralModel(
+        nodes=nodes,
+        materials=[mat],
+        sections=[sec],
+        elements=elements,
+        supports=supports,
+        load_cases=[lc_dead],
+        load_combinations=[comb_14d],
+    )
+
+    # 1. Automatic self-weight included
+    struct = model_from_core(model, load_case_id="DEAD", include_self_weight=True)
+    assert len(struct.loads) == 1
+    struct.solve()
+    reac_df = Results(struct).reactions()
+    node1_fz = reac_df.loc[reac_df["node"] == 1, "Fz"].values[0]
+    expected_w = (2400.0 * 0.5 * 9.80665 / 1000.0) * 10.0
+    assert pytest.approx(node1_fz, rel=1e-3) == expected_w
+
+    # 2. Self-weight disabled
+    struct_no_sw = model_from_core(model, load_case_id="DEAD", include_self_weight=False)
+    assert len(struct_no_sw.loads) == 0
+
+    # 3. In load combination with factor 1.4
+    struct_comb = model_from_core(model, load_combination_id="1.4D", include_self_weight=True)
+    assert len(struct_comb.loads) == 1
+    struct_comb.solve()
+    comb_reac_df = Results(struct_comb).reactions()
+    comb_node1_fz = comb_reac_df.loc[comb_reac_df["node"] == 1, "Fz"].values[0]
+    assert pytest.approx(comb_node1_fz, rel=1e-3) == expected_w * 1.4
+

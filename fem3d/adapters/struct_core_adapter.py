@@ -36,6 +36,13 @@ try:
 except ImportError:
     _STRUCT_CORE_AVAILABLE = False
 
+try:
+    from struct_load.engine.self_weight import calculate_self_weight as _calc_self_weight
+    _STRUCT_LOAD_AVAILABLE = True
+except ImportError:
+    _calc_self_weight = None
+    _STRUCT_LOAD_AVAILABLE = False
+
 from ..nodes import Node
 from ..materials.elastic import ElasticMaterial
 from ..sections.section import Section
@@ -60,9 +67,30 @@ def model_from_core(
     source: Union[StructuralModel, Project],
     load_case_id: Optional[Union[int, str]] = None,
     load_combination_id: Optional[str] = None,
+    include_self_weight: bool = True,
+    unit_system: Optional[str] = None,
+    gravity_accel: Optional[float] = None,
 ) -> Structure:
     """
     Convert a struct_core.StructuralModel or struct_core.Project into a fem3d.Structure.
+
+    Parameters
+    ----------
+    source : StructuralModel or Project
+        The structural model or project to convert.
+    load_case_id : int or str, optional
+        Target load case ID. If None and load_combination_id is None, all load cases
+        are applied (or active cases).
+    load_combination_id : str, optional
+        Target load combination ID. If specified, applies loads with combination factors.
+    include_self_weight : bool, optional
+        Whether to automatically compute and include element self-weight for any
+        load case where `include_self_weight=True`. Defaults to True.
+        Uses `struct_load.engine.self_weight.calculate_self_weight`.
+    unit_system : str, optional
+        'si' or 'us'. If source is a Project, inferred from `project.metadata.units`.
+    gravity_accel : float, optional
+        Gravity acceleration (defaults to 9.80665 for SI, 386.08858 for US).
     """
     _check_struct_core()
 
@@ -157,6 +185,62 @@ def model_from_core(
         structure.add_element(fem_el)
 
     # 6. Loads
+    # Determine unit system and gravity acceleration for self-weight
+    if unit_system is None:
+        if isinstance(source, Project) and getattr(source, "metadata", None) and getattr(source.metadata, "units", None):
+            units = source.metadata.units
+            length_u = str(getattr(units, "length", "m")).lower()
+            force_u = str(getattr(units, "force", "kn")).lower()
+            if length_u in ("in", "ft", "inch", "feet") or force_u in ("kip", "kips", "lb", "lbf", "psi", "ksi"):
+                unit_system = "us"
+            else:
+                unit_system = "si"
+        else:
+            unit_system = "si"
+            if hasattr(model, "materials"):
+                for m in model.materials:
+                    uw = getattr(m, "unit_weight", None)
+                    if uw is not None and 0 < uw < 1.0:
+                        unit_system = "us"
+                        break
+
+    if gravity_accel is None:
+        gravity_accel = 386.08858 if str(unit_system).lower() == "us" else 9.80665
+
+    sw_cache = {}
+
+    def _apply_case_self_weight_3d(case_id: str, factor: float = 1.0):
+        if not include_self_weight:
+            return
+        if _calc_self_weight is None:
+            import warnings
+            warnings.warn(
+                f"Load case '{case_id}' has include_self_weight=True, but 'struct_load' is not installed. "
+                "Self-weight was not added to the analysis model. Install struct_load to enable automatic self-weight.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return
+
+        if case_id not in sw_cache:
+            sw_cache[case_id] = _calc_self_weight(
+                model=model,
+                load_case_id=case_id,
+                gravity_accel=gravity_accel,
+                unit_system=unit_system,
+                direction="-z",
+            )
+        sw_case = sw_cache[case_id]
+
+        for dl in getattr(sw_case, "element_loads", []):
+            eid = dl.element_id
+            if eid in structure.elements:
+                el = structure.elements[eid]
+                wx = float(getattr(dl, "wx", 0.0) or 0.0) * factor
+                wy = float(getattr(dl, "wy", 0.0) or 0.0) * factor
+                wz = float(getattr(dl, "wz", 0.0) or 0.0) * factor
+                structure.add_load(DistributedLoad(el, wx=wx, wy=wy, wz=wz, coord_system="global"))
+
     target_comb = None
     if load_combination_id is not None:
         target_comb = next(
@@ -188,11 +272,18 @@ def model_from_core(
                 eid = dl.element_id
                 if eid in structure.elements:
                     el = structure.elements[eid]
-                    w1 = float(getattr(dl, "w1", getattr(dl, "wx", 0.0)) or 0.0) * factor
-                    w2 = float(getattr(dl, "w2", getattr(dl, "wy", 0.0)) or 0.0) * factor
-                    w3 = float(getattr(dl, "w3", getattr(dl, "wz", 0.0)) or 0.0) * factor
-                    cs = "local" if getattr(dl, "is_local", False) else "global"
-                    structure.add_load(DistributedLoad(el, w1=w1, w2=w2, w3=w3, coord_system=cs))
+                    if getattr(dl, "is_local", False):
+                        w1 = float(getattr(dl, "w1", 0.0) or 0.0) * factor
+                        w2 = float(getattr(dl, "w2", 0.0) or 0.0) * factor
+                        w3 = float(getattr(dl, "w3", 0.0) or 0.0) * factor
+                        structure.add_load(DistributedLoad(el, w1=w1, w2=w2, w3=w3, coord_system="local"))
+                    else:
+                        wx = float(getattr(dl, "wx", 0.0) or 0.0) * factor
+                        wy = float(getattr(dl, "wy", 0.0) or 0.0) * factor
+                        wz = float(getattr(dl, "wz", 0.0) or 0.0) * factor
+                        structure.add_load(DistributedLoad(el, wx=wx, wy=wy, wz=wz, coord_system="global"))
+            if getattr(lc, "include_self_weight", False):
+                _apply_case_self_weight_3d(lc.id, factor=factor)
     else:
         load_cases = getattr(model, "load_cases", [])
         if load_cases:
@@ -203,7 +294,10 @@ def model_from_core(
                 if not cases_to_apply:
                     active_cases = [
                         lc for lc in load_cases
-                        if lc.point_loads or getattr(lc, "element_loads", []) or getattr(lc, "distributed_loads", [])
+                        if lc.point_loads
+                        or getattr(lc, "element_loads", [])
+                        or getattr(lc, "distributed_loads", [])
+                        or (include_self_weight and getattr(lc, "include_self_weight", False))
                     ]
                     cases_to_apply = active_cases if active_cases else [load_cases[0]]
             else:
@@ -225,11 +319,19 @@ def model_from_core(
                     eid = dl.element_id
                     if eid in structure.elements:
                         el = structure.elements[eid]
-                        w1 = float(getattr(dl, "w1", getattr(dl, "wx", 0.0)) or 0.0)
-                        w2 = float(getattr(dl, "w2", getattr(dl, "wy", 0.0)) or 0.0)
-                        w3 = float(getattr(dl, "w3", getattr(dl, "wz", 0.0)) or 0.0)
-                        cs = "local" if getattr(dl, "is_local", False) else "global"
-                        structure.add_load(DistributedLoad(el, w1=w1, w2=w2, w3=w3, coord_system=cs))
+                        if getattr(dl, "is_local", False):
+                            w1 = float(getattr(dl, "w1", 0.0) or 0.0)
+                            w2 = float(getattr(dl, "w2", 0.0) or 0.0)
+                            w3 = float(getattr(dl, "w3", 0.0) or 0.0)
+                            structure.add_load(DistributedLoad(el, w1=w1, w2=w2, w3=w3, coord_system="local"))
+                        else:
+                            wx = float(getattr(dl, "wx", 0.0) or 0.0)
+                            wy = float(getattr(dl, "wy", 0.0) or 0.0)
+                            wz = float(getattr(dl, "wz", 0.0) or 0.0)
+                            structure.add_load(DistributedLoad(el, wx=wx, wy=wy, wz=wz, coord_system="global"))
+
+                if getattr(lc, "include_self_weight", False):
+                    _apply_case_self_weight_3d(lc.id, factor=1.0)
 
         # Legacy backward compatibility with model.loads
         for ld in getattr(model, "loads", []):

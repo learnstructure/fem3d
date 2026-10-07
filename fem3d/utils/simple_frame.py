@@ -387,6 +387,20 @@ class SimpleFrame:
         drawer = DrawStructure(self.structure)
         return drawer.draw_buckling_mode(mode=mode, **kwargs)
 
+    def modal_analysis(self, num_modes: int = 6) -> dict:
+        """
+        Perform 3D undamped eigenvalue modal analysis.
+        """
+        return self.structure.modal_analysis(num_modes=num_modes)
+
+    def set_modal_results(self, omega, phi):
+        """
+        Register modal analysis results on the structure.
+        """
+        return self.structure.set_modal_results(omega, phi)
+
+
+
 
 # Convenient alias
 SimpleFrame3D = SimpleFrame

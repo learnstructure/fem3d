@@ -344,3 +344,57 @@ class Structure:
             "modes": full_modes,
         }
         return self.modal_results
+
+    def set_modal_results(self, omega, phi):
+        """
+        Register modal analysis results on the structure for later use by plotting utilities.
+
+        Parameters
+        ----------
+        omega : numpy.ndarray
+            Array of natural circular frequencies (rad/s), one per mode.
+        phi : numpy.ndarray
+            Mode shape matrix of shape (n_free_dofs, n_modes) or (neq, n_modes).
+        """
+        omega_arr = np.asarray(omega, dtype=float)
+        phi_arr = np.asarray(phi, dtype=float)
+        periods = np.zeros_like(omega_arr)
+        non_zero = omega_arr > 1e-10
+        periods[non_zero] = 2.0 * np.pi / omega_arr[non_zero]
+
+        if not self.free_dofs:
+            self.apply_boundary_conditions()
+
+        if phi_arr.ndim == 2:
+            num_modes = phi_arr.shape[1]
+            if phi_arr.shape[0] == len(self.free_dofs):
+                full_modes = np.zeros((self.neq, num_modes), dtype=float)
+                full_modes[self.free_dofs, :] = phi_arr
+            elif phi_arr.shape[0] == self.neq:
+                full_modes = phi_arr.copy()
+            else:
+                full_modes = phi_arr
+        elif phi_arr.ndim == 1:
+            if len(phi_arr) == len(self.free_dofs):
+                full_modes = np.zeros((self.neq, 1), dtype=float)
+                full_modes[self.free_dofs, 0] = phi_arr
+            else:
+                full_modes = phi_arr.reshape(-1, 1)
+        else:
+            full_modes = phi_arr
+
+        self.modal_results = {
+            "omega": omega_arr,
+            "periods": periods,
+            "frequencies": omega_arr / (2.0 * np.pi),
+            "phi": phi_arr,
+            "modes": full_modes,
+        }
+        return self.modal_results
+
+    def commit_state(self):
+        """Commit the state of all elements after a converged step."""
+        for el in self.elements.values():
+            if hasattr(el, "commit"):
+                el.commit()
+
