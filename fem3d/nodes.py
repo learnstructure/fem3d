@@ -113,6 +113,10 @@ class Node:
                 bool(rz_fixed),
             ]
 
+    def is_supported(self) -> bool:
+        """Return True if any degree of freedom at this node is restrained."""
+        return any(self.support)
+
     def set_load(
         self,
         fx: Union[float, Iterable] = 0.0,

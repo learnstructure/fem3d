@@ -482,12 +482,32 @@ structure.add_load(load)
 
 ### `DistributedLoad`
 
-Uniformly distributed load along an element **in local element coordinates** ($w_1, w_2, w_3$) or global coordinates ($w_X, w_Y, w_Z$):
+Uniformly distributed load along an element with explicit coordinate conventions:
+- **Local element coordinates** ($w_1, w_2, w_3$):
+  - $w_1$: axial load along local axis 1
+  - $w_2$: transverse load along local axis 2 (bending in 1-2 plane about axis 3)
+  - $w_3$: transverse load along local axis 3 (bending in 1-3 plane about axis 2)
+- **Global Cartesian coordinates** ($w_x, w_y, w_z$):
+  - $w_x, w_y, w_z$: global load components along global X, Y, Z (automatically rotated to local via $R$).
+
+Both representations ($w_1, w_2, w_3$ and $w_x, w_y, w_z$) are synchronized and accessible on the instance regardless of how the load was defined.
 
 ```python
 from fem3d import DistributedLoad
-load = DistributedLoad(element, w1=0.0, w2=0.0, w3=-0.5)
-structure.add_load(load)
+
+# Local load (via parameters or factory):
+load_local = DistributedLoad(element, w3=-0.5)
+# or: DistributedLoad.local(element, w3=-0.5)
+
+# Global load (e.g., gravity along global -Z):
+load_glob = DistributedLoad(element, wz=-48.0)
+# or: DistributedLoad.global_load(element, wz=-48.0)
+
+# Synchronized properties:
+print(load_glob.wz)            # -48.0 (global)
+print(load_glob.w2)            # local component computed via R
+print(load_glob.global_components)
+print(load_glob.local_components)
 ```
 
 Fixed-end equivalent nodal forces (exact for uniform load, Euler-Bernoulli):
@@ -498,15 +518,22 @@ Fixed-end equivalent nodal forces (exact for uniform load, Euler-Bernoulli):
 | $w_3$ (local 3) | $\pm w_3 L / 2$ | $\mp w_3 L^2 / 12$ about local axis 2 |
 | $w_1$ (local 1) | $\pm w_1 L / 2$ | none |
 
-Loads are transformed to global DOFs via the element's $T$ matrix.
+Loads are transformed to global DOFs via the element's transformation matrix $T$.
 
 ### `ElementPointLoad`
 
-Concentrated load at a point along an element at local position $x$ (in element length units):
+Concentrated load at a point along an element at position $x$ ($0 \le x \le L$ from start node):
+- **Local element coordinates**: $p_1, p_2, p_3$ (forces) and $m_1, m_2, m_3$ (moments).
+- **Global Cartesian coordinates**: $p_x, p_y, p_z$ (forces) and $m_x, m_y, m_z$ (moments).
 
 ```python
 from fem3d import ElementPointLoad
-load = ElementPointLoad(element, p1=0.0, p2=-5.0, p3=0.0, m1=0.0, m2=0.0, m3=0.0, x=60.0)
+
+# Local point load:
+pl_local = ElementPointLoad.local(element, p2=-5.0, x=60.0)
+
+# Global point load (e.g. downward vertical load in Z):
+pl_glob = ElementPointLoad.global_load(element, pz=-100.0, x=60.0)
 ```
 
 ---
@@ -601,10 +628,18 @@ sc_model = model_to_core(frame)          # SimpleFrame or Structure
 sc_result = result_to_core(results)      # Results object or structure
 
 # struct_core -> fem3d
-structure = model_from_core(sc_model)    # StructuralModel or Project
+structure = model_from_core(
+    sc_model,
+    include_self_weight=True,            # automatically computes element self-weight via struct_load
+    include_shear_deformation=True,     # consider Timoshenko shear flexibility (As2, As3)
+)
 
 # Support mapping (struct_core.Support now supports full 6 DOF):
 #   fem3d [ux, uy, uz, rx, ry, rz] <-> struct_core Support {ux, uy, uz, rx, ry, rz}
+
+# Section & Timoshenko Shear Areas:
+#   fem3d [As2, As3] <-> struct_core GeneralSection [As2, As3] / Rectangular & Circular sections
+#   fem3d FrameElement.include_shear_deformation <-> struct_core BeamElement.include_shear_deformation
 
 # AnalysisResult mapping:
 #   node_results: Dict[NodeId, NodeResult] with NodeDisplacement (6 DOF) + NodeReaction (6 DOF)
@@ -696,6 +731,7 @@ frame.draw(
     show_loads=True,
     show_supports=True,
     color_by_force=True,     # Tension in blue, compression in red
+    show_self_weight=False,  # Treat self-weight as body force (default); set True to display
     title="3D Space Structure",
     save_path="structure_3d.png",
 )
@@ -710,6 +746,7 @@ frame.plot_buckling_mode(mode=1, title="First Buckling Mode")
 **Key Visualization Features:**
 - **Realistic 3D Supports:** Fixed anchor pads with ground stubs, 3D pinned pyramids, and roller bearings.
 - **Double-Headed Moment Arrows:** 3D moments drawn with double arrowheads along the moment vector axis.
+- **Transverse Load Arrays:** Distributed member loads rendered with proper 3D vector orientation pointing onto members, with automatic suppression of axial self-weight clutter on vertical columns.
 - **Cubic Hermite Splines:** 3D deformed beam curves showing real member bending curvature in space.
 - **Axial Force Colormap:** Elements color-coded with a synchronized colorbar (blue = tension, red = compression).
 

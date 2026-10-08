@@ -70,6 +70,7 @@ def model_from_core(
     include_self_weight: bool = True,
     unit_system: Optional[str] = None,
     gravity_accel: Optional[float] = None,
+    include_shear_deformation: Optional[bool] = None,
 ) -> Structure:
     """
     Convert a struct_core.StructuralModel or struct_core.Project into a fem3d.Structure.
@@ -91,6 +92,10 @@ def model_from_core(
         'si' or 'us'. If source is a Project, inferred from `project.metadata.units`.
     gravity_accel : float, optional
         Gravity acceleration (defaults to 9.80665 for SI, 386.08858 for US).
+    include_shear_deformation : bool, optional
+        Whether to consider shear deformation (Timoshenko beam theory) in frame elements.
+        If None (default), reads `include_shear_deformation` from each `struct_core.BeamElement`.
+        If True or False, overrides all frame elements in the model.
     """
     _check_struct_core()
 
@@ -152,7 +157,9 @@ def model_from_core(
             I3 = getattr(sec, "I3", 1.0)
             I2 = getattr(sec, "I2", I3)
             J = getattr(sec, "J", I3 + I2)
-            sec_map[sec.id] = Section(A=A, I2=I2, I3=I3, J=J)
+            as2 = getattr(sec, "As2", getattr(sec, "as2", getattr(sec, "Ay", getattr(sec, "AS2", None))))
+            as3 = getattr(sec, "As3", getattr(sec, "as3", getattr(sec, "Az", getattr(sec, "AS3", None))))
+            sec_map[sec.id] = Section(A=A, I2=I2, I3=I3, J=J, As2=as2, As3=as3)
 
     # 5. Elements
     for elem in model.elements:
@@ -180,7 +187,19 @@ def model_from_core(
         else:  # Beam / Frame
             mat = mat_map.get(elem.material_id, ElasticMaterial(E=29000.0))
             sec = sec_map.get(elem.section_id, Section(A=10.0, I2=100.0, I3=200.0, J=50.0))
-            fem_el = FrameElement(eid=elem.id, node_i=n_i, node_j=n_j, material=mat, section=sec)
+            elem_shear = (
+                include_shear_deformation
+                if include_shear_deformation is not None
+                else getattr(elem, "include_shear_deformation", False)
+            )
+            fem_el = FrameElement(
+                eid=elem.id,
+                node_i=n_i,
+                node_j=n_j,
+                material=mat,
+                section=sec,
+                include_shear_deformation=elem_shear,
+            )
 
         structure.add_element(fem_el)
 
@@ -239,7 +258,9 @@ def model_from_core(
                 wx = float(getattr(dl, "wx", 0.0) or 0.0) * factor
                 wy = float(getattr(dl, "wy", 0.0) or 0.0) * factor
                 wz = float(getattr(dl, "wz", 0.0) or 0.0) * factor
-                structure.add_load(DistributedLoad(el, wx=wx, wy=wy, wz=wz, coord_system="global"))
+                structure.add_load(
+                    DistributedLoad(el, wx=wx, wy=wy, wz=wz, coord_system="global", is_self_weight=True)
+                )
 
     target_comb = None
     if load_combination_id is not None:
@@ -407,7 +428,9 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
 
         if hasattr(el, "section") and el.section is not None:
             sec = el.section
-            sec_key = (sec.A, sec.I2, sec.I3, sec.J)
+            as2_val = getattr(sec, "As2", 0.0) or 0.0
+            as3_val = getattr(sec, "As3", 0.0) or 0.0
+            sec_key = (sec.A, sec.I2, sec.I3, sec.J, as2_val, as3_val)
             if sec_key not in sec_ids:
                 sid = f"sec_{len(sec_ids)+1}"
                 sec_ids[sec_key] = sid
@@ -418,6 +441,8 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
                         I2=sec.I2 if sec.I2 > 0 else 1.0,
                         I3=sec.I3 if sec.I3 > 0 else 1.0,
                         J=sec.J if sec.J > 0 else 1.0,
+                        As2=as2_val if as2_val > 0 else None,
+                        As3=as3_val if as3_val > 0 else None,
                     )
                 )
 
@@ -425,7 +450,9 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
     for el in structure.elements.values():
         if isinstance(el, TrussElement):
             mid = mat_ids.get((el.material.E, getattr(el.material, "nu", 0.3), el.material.rho))
-            sid = sec_ids.get((el.section.A, el.section.I2, el.section.I3, el.section.J))
+            as2_val = getattr(el.section, "As2", 0.0) or 0.0
+            as3_val = getattr(el.section, "As3", 0.0) or 0.0
+            sid = sec_ids.get((el.section.A, el.section.I2, el.section.I3, el.section.J, as2_val, as3_val))
             model.elements.append(
                 ScTrussElement(
                     id=el.id,
@@ -448,7 +475,9 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
             )
         else:
             mid = mat_ids.get((el.material.E, getattr(el.material, "nu", 0.3), el.material.rho))
-            sid = sec_ids.get((el.section.A, el.section.I2, el.section.I3, el.section.J))
+            as2_val = getattr(el.section, "As2", 0.0) or 0.0
+            as3_val = getattr(el.section, "As3", 0.0) or 0.0
+            sid = sec_ids.get((el.section.A, el.section.I2, el.section.I3, el.section.J, as2_val, as3_val))
             model.elements.append(
                 ScBeamElement(
                     id=el.id,
@@ -456,6 +485,7 @@ def model_to_core(source: Union[Structure, object]) -> StructuralModel:
                     end_node=el.node_j.id,
                     material_id=mid,
                     section_id=sid,
+                    include_shear_deformation=bool(getattr(el, "include_shear_deformation", False)),
                 )
             )
 

@@ -77,6 +77,7 @@ class DrawStructure:
         show_node_labels: bool = True,
         show_element_labels: bool = False,
         color_by_force: bool = False,
+        show_self_weight: bool = False,
         elev: float = 25.0,
         azim: float = -60.0,
         title: Optional[str] = None,
@@ -105,6 +106,8 @@ class DrawStructure:
             Whether to annotate element IDs at member midpoints. Defaults to False.
         color_by_force : bool, optional
             Whether to color deformed members by axial force (tension blue, compression red). Defaults to False.
+        show_self_weight : bool, optional
+            Whether to draw self-weight distributed loads. Defaults to False.
         elev : float, optional
             3D viewing camera elevation angle in degrees. Defaults to 25.0.
         azim : float, optional
@@ -155,7 +158,7 @@ class DrawStructure:
 
         # 3. Applied Loads (forces & double-headed moments)
         if show_loads:
-            draw_3d_loads(ax=ax, structure=self.structure, span=span, arrow_scale=self.arrow_scale)
+            draw_3d_loads(ax=ax, structure=self.structure, span=span, arrow_scale=self.arrow_scale, show_self_weight=show_self_weight)
 
         # 4. Node Markers & Labels
         if show_node_labels:

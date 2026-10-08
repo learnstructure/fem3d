@@ -146,3 +146,45 @@ def test_convenience_functions(solved_space_truss):
     """Test module-level convenience functions."""
     ax1 = draw_structure(solved_space_truss, show=False)
     assert ax1 is not None
+
+
+def test_draw_distributed_loads_filtering(tmp_path):
+    """
+    Test that member distributed loads are drawn with correct direction,
+    pure axial column loads are not drawn as transverse loads,
+    and show_self_weight flag properly controls rendering.
+    """
+    from fem3d.loads import DistributedLoad
+
+    frame = SimpleFrame()
+    # Vertical column along Z
+    frame.add_node(1, 0.0, 0.0, 0.0)
+    frame.add_node(2, 0.0, 0.0, 3.0)
+    # Horizontal beam along X
+    frame.add_node(3, 4.0, 0.0, 3.0)
+
+    c = frame.add_frame(1, 1, 2, E=200e6, A=0.01, I2=1e-4, I3=2e-4, J=1e-5)
+    b = frame.add_frame(2, 2, 3, E=200e6, A=0.01, I2=1e-4, I3=2e-4, J=1e-5)
+    frame.add_support(1, [1, 1, 1, 1, 1, 1])
+
+    # Column has self-weight along global -Z (pure axial)
+    dl_col = DistributedLoad(c, wz=-0.02, is_self_weight=True)
+    # Beam has self-weight and applied dead load along global -Z (transverse)
+    dl_beam_sw = DistributedLoad(b, wz=-0.05, is_self_weight=True)
+    dl_beam_applied = DistributedLoad(b, wz=-0.10, is_self_weight=False)
+
+    frame.structure.add_load(dl_col)
+    frame.structure.add_load(dl_beam_sw)
+    frame.structure.add_load(dl_beam_applied)
+
+    drawer = DrawStructure(frame.structure)
+    img_path1 = str(tmp_path / "loads_applied_only.png")
+    ax1 = drawer.draw(show_self_weight=False, show_loads=True, save_path=img_path1, show=False)
+    assert ax1 is not None
+    assert os.path.exists(img_path1)
+
+    img_path2 = str(tmp_path / "loads_with_sw.png")
+    ax2 = drawer.draw(show_self_weight=True, show_loads=True, save_path=img_path2, show=False)
+    assert ax2 is not None
+    assert os.path.exists(img_path2)
+

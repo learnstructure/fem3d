@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from fem3d import SimpleFrame, Results, Structure, Node, ElasticMaterial, Section, FrameElement
-from fem3d.loads import PointLoad, DistributedLoad
+from fem3d.loads import PointLoad, DistributedLoad, ElementPointLoad
 
 
 def test_cantilever_axial_extension():
@@ -330,3 +330,103 @@ def test_aliases():
     from fem3d import BeamElement as Beam, SimpleFrame3D as SF3D
     assert Beam is FrameElement
     assert SF3D is SimpleFrame
+
+
+def test_distributed_load_coordinates_and_properties():
+    """
+    Test DistributedLoad coordinate systems:
+    - 1, 2, 3 strictly for local
+    - x, y, z strictly for global
+    - bidirectional property access
+    - auto-detection of coordinate system
+    - validation of conflicting inputs
+    """
+    frame = SimpleFrame()
+    frame.add_node(1, 0.0, 0.0, 0.0)
+    frame.add_node(2, 6.0, 0.0, 0.0)
+    el = frame.add_frame(1, 1, 2, E=200e6, A=0.01, I2=1e-4, I3=2e-4, J=1e-5)
+    R = el.rotation_matrix_3x3()
+    # Member along +X: local 1 = +X, local 2 = +Z, local 3 = -Y
+
+    # 1. Local load definition
+    dl_loc = DistributedLoad.local(el, w1=10.0, w2=20.0, w3=30.0)
+    assert dl_loc.coord_system == "local"
+    assert dl_loc.w1 == 10.0
+    assert dl_loc.w2 == 20.0
+    assert dl_loc.w3 == 30.0
+    np.testing.assert_allclose(dl_loc.local_components, [10.0, 20.0, 30.0])
+    # Global components derived from R.T @ w_local
+    w_expected_glob = R.T @ np.array([10.0, 20.0, 30.0])
+    assert pytest.approx(dl_loc.wx) == w_expected_glob[0]
+    assert pytest.approx(dl_loc.wy) == w_expected_glob[1]
+    assert pytest.approx(dl_loc.wz) == w_expected_glob[2]
+    np.testing.assert_allclose(dl_loc.global_components, w_expected_glob)
+
+    # 2. Global load definition via factory
+    dl_glob = DistributedLoad.global_load(el, wx=0.0, wy=0.0, wz=-25.0)
+    assert dl_glob.coord_system == "global"
+    assert dl_glob.wz == -25.0
+    # Since local 2 is +Z, local w2 should be -25.0
+    assert pytest.approx(dl_glob.w2) == -25.0
+    assert pytest.approx(dl_glob.w1) == 0.0
+    assert pytest.approx(dl_glob.w3) == 0.0
+
+    # 3. Auto-detection from keyword arguments without coord_system
+    dl_auto_glob = DistributedLoad(el, wz=-48.0)
+    assert dl_auto_glob.coord_system == "global"
+    assert dl_auto_glob.wz == -48.0
+    assert pytest.approx(dl_auto_glob.w2) == -48.0
+
+    dl_auto_loc = DistributedLoad(el, w3=0.5)
+    assert dl_auto_loc.coord_system == "local"
+    assert dl_auto_loc.w3 == 0.5
+
+    # 4. Conflict error when passing both local and global components
+    with pytest.raises(ValueError, match="Cannot specify both local components"):
+        DistributedLoad(el, w1=5.0, wx=10.0)
+
+    # 5. Mismatched coord_system specification
+    with pytest.raises(ValueError, match="coord_system='local' was specified"):
+        DistributedLoad(el, wz=-10.0, coord_system="local")
+
+    # 6. Representation string
+    rep = repr(dl_glob)
+    assert "DistributedLoad" in rep
+    assert "local=" in rep
+    assert "global=" in rep
+
+
+def test_element_point_load_coordinates_and_properties():
+    """
+    Test ElementPointLoad coordinate systems, properties, and validation.
+    """
+    frame = SimpleFrame()
+    frame.add_node(1, 0.0, 0.0, 0.0)
+    frame.add_node(2, 6.0, 0.0, 0.0)
+    el = frame.add_frame(1, 1, 2, E=200e6, A=0.01, I2=1e-4, I3=2e-4, J=1e-5)
+
+    # 1. Local point load
+    pl_loc = ElementPointLoad.local(el, p2=-50.0, m3=120.0, x=3.0)
+    assert pl_loc.coord_system == "local"
+    assert pl_loc.p2 == -50.0
+    assert pl_loc.m3 == 120.0
+    assert pytest.approx(pl_loc.pz) == -50.0
+    np.testing.assert_allclose(pl_loc.local_forces, [0.0, -50.0, 0.0])
+    np.testing.assert_allclose(pl_loc.local_moments, [0.0, 0.0, 120.0])
+
+    # 2. Global point load
+    pl_glob = ElementPointLoad.global_load(el, pz=-100.0, x=3.0)
+    assert pl_glob.coord_system == "global"
+    assert pl_glob.pz == -100.0
+    assert pytest.approx(pl_glob.p2) == -100.0
+    np.testing.assert_allclose(pl_glob.global_forces, [0.0, 0.0, -100.0])
+
+    # 3. Auto-detection
+    pl_auto = ElementPointLoad(el, pz=-75.0, x=2.0)
+    assert pl_auto.coord_system == "global"
+    assert pl_auto.pz == -75.0
+
+    # 4. Conflict error
+    with pytest.raises(ValueError, match="Cannot specify both local components"):
+        ElementPointLoad(el, p1=10.0, px=20.0, x=1.0)
+

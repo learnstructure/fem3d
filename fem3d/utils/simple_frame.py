@@ -294,15 +294,29 @@ class SimpleFrame:
     def add_distributed_load(
         self,
         element_id: Union[int, str],
-        w1: float = 0.0,
-        w2: float = 0.0,
-        w3: float = 0.0,
-        coord_system: str = "local",
+        w1: Optional[float] = None,
+        w2: Optional[float] = None,
+        w3: Optional[float] = None,
+        coord_system: Optional[str] = None,
         wx: Optional[float] = None,
         wy: Optional[float] = None,
         wz: Optional[float] = None,
     ) -> DistributedLoad:
-        """Apply uniformly distributed load along an element."""
+        """
+        Apply uniformly distributed load along an element.
+
+        Parameters
+        ----------
+        element_id : int or str
+            The element identifier.
+        w1, w2, w3 : float, optional
+            Load intensities along element local 1 (axial), 2 (minor flexure),
+            and 3 (major flexure) axes.
+        coord_system : str, optional
+            'local' or 'global'. If omitted, automatically inferred.
+        wx, wy, wz : float, optional
+            Load intensities along global X, Y, Z axes.
+        """
         element = self.structure.elements[element_id]
         dload = DistributedLoad(
             element=element,
@@ -320,14 +334,14 @@ class SimpleFrame:
     def add_element_point_load(
         self,
         element_id: Union[int, str],
-        p1: float = 0.0,
-        p2: float = 0.0,
-        p3: float = 0.0,
-        m1: float = 0.0,
-        m2: float = 0.0,
-        m3: float = 0.0,
+        p1: Optional[float] = None,
+        p2: Optional[float] = None,
+        p3: Optional[float] = None,
+        m1: Optional[float] = None,
+        m2: Optional[float] = None,
+        m3: Optional[float] = None,
         x: float = 0.0,
-        coord_system: str = "local",
+        coord_system: Optional[str] = None,
         px: Optional[float] = None,
         py: Optional[float] = None,
         pz: Optional[float] = None,
@@ -335,7 +349,26 @@ class SimpleFrame:
         my: Optional[float] = None,
         mz: Optional[float] = None,
     ) -> ElementPointLoad:
-        """Apply concentrated point load acting at distance x along an element."""
+        """
+        Apply concentrated point load acting at distance x along an element.
+
+        Parameters
+        ----------
+        element_id : int or str
+            The element identifier.
+        p1, p2, p3 : float, optional
+            Point force components along local 1, 2, 3 axes.
+        m1, m2, m3 : float, optional
+            Point moment components about local 1, 2, 3 axes.
+        x : float, optional
+            Distance from start node along element length. Defaults to 0.0.
+        coord_system : str, optional
+            'local' or 'global'. If omitted, automatically inferred.
+        px, py, pz : float, optional
+            Point force components along global X, Y, Z axes.
+        mx, my, mz : float, optional
+            Point moment components about global X, Y, Z axes.
+        """
         element = self.structure.elements[element_id]
         pload = ElementPointLoad(
             element=element,

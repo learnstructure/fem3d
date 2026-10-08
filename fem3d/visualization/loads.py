@@ -86,9 +86,23 @@ def draw_3d_moment(ax, pos: np.ndarray, moment_vec: np.ndarray, arrow_len: float
         )
 
 
-def draw_3d_loads(ax, structure, span: float, arrow_scale: float = 0.12):
+def draw_3d_loads(ax, structure, span: float, arrow_scale: float = 0.12, show_self_weight: bool = False):
     """
     Draw all applied nodal point loads, point moments, and member distributed loads.
+
+    Parameters
+    ----------
+    ax : Axes3D
+        Matplotlib 3D axes.
+    structure : Structure
+        The 3D Structure instance.
+    span : float
+        Characteristic structure span dimension.
+    arrow_scale : float, optional
+        Scaling factor for arrows relative to structure span. Defaults to 0.12.
+    show_self_weight : bool, optional
+        Whether to draw self-weight distributed loads. Defaults to False (matching
+        standard FEA / SAP2000 conventions where self-weight is treated as a body force).
     """
     base_arrow_len = max(span * arrow_scale, 0.1)
 
@@ -120,26 +134,33 @@ def draw_3d_loads(ax, structure, span: float, arrow_scale: float = 0.12):
         if el is None:
             continue
 
-        # Check for distributed load components
+        # Skip self-weight loads unless explicitly requested
+        if not show_self_weight and getattr(load, "is_self_weight", False):
+            continue
+
+        # Global load components directly from load instance
         wx = getattr(load, "wx", 0.0)
         wy = getattr(load, "wy", 0.0)
         wz = getattr(load, "wz", 0.0)
-        w_mag = np.hypot(wx, np.hypot(wy, wz))
+        w_global = np.array([wx, wy, wz], dtype=float)
+        w_mag = np.linalg.norm(w_global)
         if w_mag < 1e-9:
             continue
 
-        # Compute load vector in global coordinates
-        w_local = np.array([wx, wy, wz], dtype=float)
-        R = el.rotation_matrix_3x3()  # 3x3 direction cosine rotation matrix
-        w_global = R.T @ w_local
-        w_dir = w_global / w_mag
-
-        # Draw 5 arrows along the element
-        n_arrows = 5
-        tails = []
-        L = el.length
+        # Check if the load is purely axial along the member (e.g. self-weight of a vertical column)
         p_i = np.array([el.node_i.x, el.node_i.y, el.node_i.z], dtype=float)
         p_j = np.array([el.node_j.x, el.node_j.y, el.node_j.z], dtype=float)
+        v1 = (p_j - p_i) / el.length
+        cross_mag = np.linalg.norm(np.cross(v1, w_global / w_mag))
+        if cross_mag < 1e-4:
+            # Transverse load diagram is not applicable to purely axial member loads
+            continue
+
+        w_dir = w_global / w_mag
+
+        # Draw 5 arrows along the element pointing towards the member centerline
+        n_arrows = 5
+        tails = []
 
         for s in np.linspace(0.1, 0.9, n_arrows):
             pt = p_i + s * (p_j - p_i)

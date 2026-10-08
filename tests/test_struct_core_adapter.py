@@ -113,3 +113,49 @@ def test_model_from_core_with_self_weight():
     comb_node1_fz = comb_reac_df.loc[comb_reac_df["node"] == 1, "Fz"].values[0]
     assert pytest.approx(comb_node1_fz, rel=1e-3) == expected_w * 1.4
 
+
+@pytest.mark.skipif(not HAS_STRUCT_CORE, reason="struct_core not installed")
+def test_model_from_core_shear_deformation():
+    from struct_core import (
+        StructuralModel,
+        Node,
+        Support,
+        ElasticMaterial,
+        GeneralSection,
+        BeamElement,
+        PointLoad,
+        LoadCase,
+    )
+
+    nodes = [
+        Node(id=1, x=0.0, y=0.0, z=0.0),
+        Node(id=2, x=0.0, y=0.0, z=5.0),
+    ]
+    mat = ElasticMaterial(id="Steel", E=200e6, nu=0.3)
+    sec = GeneralSection(id="Sec1", A=0.01, I3=1e-4, I2=1e-4, J=1e-4, As2=0.008, As3=0.008)
+    elements = [
+        BeamElement(id=1, start_node=1, end_node=2, material_id="Steel", section_id="Sec1"),
+    ]
+    supports = [Support.fixed_3d(node_id=1)]
+    lc = LoadCase(id="LC1", point_loads=[PointLoad(node_id=2, fx=100.0)])
+    model = StructuralModel(nodes=nodes, materials=[mat], sections=[sec], elements=elements, supports=supports, load_cases=[lc])
+
+    # 1. With shear deformation explicitly disabled
+    struct_eb = model_from_core(model, include_shear_deformation=False)
+    assert struct_eb.elements[1].include_shear_deformation is False
+    struct_eb.solve()
+    disp_eb = Results(struct_eb).node_displacements()
+    tip_dx_eb = disp_eb.loc[disp_eb["node"] == 2, "ux"].values[0]
+
+    # 2. With shear deformation explicitly enabled
+    struct_timo = model_from_core(model, include_shear_deformation=True)
+    assert struct_timo.elements[1].include_shear_deformation is True
+    assert struct_timo.elements[1].section.As2 == 0.008
+    struct_timo.solve()
+    disp_timo = Results(struct_timo).node_displacements()
+    tip_dx_timo = disp_timo.loc[disp_timo["node"] == 2, "ux"].values[0]
+
+    # Timoshenko beam includes additional shear flexibility: tip deflection must be strictly greater
+    assert tip_dx_timo > tip_dx_eb
+
+
