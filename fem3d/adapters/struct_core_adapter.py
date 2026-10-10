@@ -208,12 +208,19 @@ def model_from_core(
     if unit_system is None:
         if isinstance(source, Project) and getattr(source, "metadata", None) and getattr(source.metadata, "units", None):
             units = source.metadata.units
-            length_u = str(getattr(units, "length", "m")).lower()
-            force_u = str(getattr(units, "force", "kn")).lower()
-            if length_u in ("in", "ft", "inch", "feet") or force_u in ("kip", "kips", "lb", "lbf", "psi", "ksi"):
+            if getattr(units, "is_us_customary", False):
                 unit_system = "us"
-            else:
+            elif getattr(units, "is_metric", False):
                 unit_system = "si"
+            else:
+                length_u = str(getattr(units, "length", "m")).lower()
+                force_u = str(getattr(units, "force", "kn")).lower()
+                if length_u in ("in", "ft", "inch", "feet") or force_u in ("kip", "kips", "lb", "lbf", "psi", "ksi"):
+                    unit_system = "us"
+                else:
+                    unit_system = "si"
+            if gravity_accel is None:
+                gravity_accel = getattr(units, "gravity_acceleration", None)
         else:
             unit_system = "si"
             if hasattr(model, "materials"):
@@ -353,19 +360,6 @@ def model_from_core(
 
                 if getattr(lc, "include_self_weight", False):
                     _apply_case_self_weight_3d(lc.id, factor=1.0)
-
-        # Legacy backward compatibility with model.loads
-        for ld in getattr(model, "loads", []):
-            if getattr(ld, "type", "") == "nodal_point":
-                nid = ld.node_id
-                if nid in structure.nodes:
-                    fx = getattr(ld, "fx", 0.0)
-                    fy = getattr(ld, "fy", 0.0)
-                    fz = getattr(ld, "fz", 0.0)
-                    mx = getattr(ld, "mx", 0.0)
-                    my = getattr(ld, "my", 0.0)
-                    mz = getattr(ld, "mz", 0.0)
-                    structure.add_load(PointLoad(structure.nodes[nid], fx=fx, fy=fy, fz=fz, mx=mx, my=my, mz=mz))
 
     return structure
 
