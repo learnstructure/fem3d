@@ -69,7 +69,7 @@ class FrameElement(ElementBase):
         section: Union[Section, float],
         roll_angle: float = 0.0,
         web_vector: Optional[np.ndarray] = None,
-        extra_mass: float = 0.0,
+        mass: float = 0.0,
         releases_i: Optional[List[bool]] = None,
         releases_j: Optional[List[bool]] = None,
         include_shear_deformation: bool = False,
@@ -95,7 +95,7 @@ class FrameElement(ElementBase):
         web_vector : numpy.ndarray, optional
             Reference orientation vector pointing in the local 1-2 plane (e.g. web direction / v2).
             If provided, overrides default orientation. Defaults to None.
-        extra_mass : float, optional
+        mass : float, optional
             Additional distributed non-structural mass per unit length. Defaults to 0.0.
         releases_i : list of bool, optional
             End release fixity at start node [u1, u2, u3, r1, r2, r3].
@@ -125,7 +125,7 @@ class FrameElement(ElementBase):
         self.I2 = self.section.I2
         self.I3 = self.section.I3
         self.J = self.section.J
-        self.extra_mass = float(extra_mass)
+        self.mass = float(mass)
         self.include_shear_deformation = include_shear_deformation
 
         self.releases_i = releases_i
@@ -311,7 +311,7 @@ class FrameElement(ElementBase):
           ASCE Journal of the Structural Division, 89(ST4), 161-178.
         """
         L = self.length
-        total_density = self.material.rho * self.area + self.extra_mass
+        total_density = self.material.rho * self.area + self.mass
         m_total = total_density * L
 
         m = np.zeros((12, 12), dtype=float)

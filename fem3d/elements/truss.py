@@ -2,7 +2,7 @@
 TrussElement module defining 3D space truss (pin-jointed bar) finite elements.
 """
 
-from typing import Union
+from typing import Optional, Union
 import numpy as np
 
 from .element import ElementBase
@@ -33,7 +33,7 @@ class TrussElement(ElementBase):
         node_j,
         material: Union[ElasticMaterial, float],
         section: Union[Section, float],
-        extra_mass: float = 0.0,
+        mass: float = 0.0,
     ):
         """
         Initialize a 3D TrussElement.
@@ -50,7 +50,7 @@ class TrussElement(ElementBase):
             Material definition or numeric Young's modulus E.
         section : Section or float
             Section definition or numeric cross-sectional area A.
-        extra_mass : float, optional
+        mass : float, optional
             Additional distributed non-structural mass per unit length. Defaults to 0.0.
         """
         super().__init__(eid, node_i, node_j)
@@ -66,7 +66,7 @@ class TrussElement(ElementBase):
             self.section = section
 
         self.area = self.section.A
-        self.extra_mass = float(extra_mass)
+        self.mass = float(mass)
         self.eq_load = np.zeros(12, dtype=float)
 
     def local_stiffness(self) -> np.ndarray:
@@ -113,7 +113,7 @@ class TrussElement(ElementBase):
     def local_mass_matrix(self, lumped: bool = False) -> np.ndarray:
         """Return 12x12 mass matrix in local coordinates."""
         L = self.length
-        total_density = self.material.rho * self.area + self.extra_mass
+        total_density = self.material.rho * self.area + self.mass
         m_total = total_density * L
         m = np.zeros((12, 12), dtype=float)
 

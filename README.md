@@ -630,6 +630,7 @@ sc_result = result_to_core(results)      # Results object or structure
 # struct_core -> fem3d
 structure = model_from_core(
     sc_model,
+    mass_source=sc_model.mass_source,    # evaluate dynamic inertial mass (e.g. 1.0D + 0.25L)
     include_self_weight=True,            # automatically computes element self-weight via struct_load
     include_shear_deformation=True,     # consider Timoshenko shear flexibility (As2, As3)
 )
@@ -766,6 +767,39 @@ The stiffness matrices, mass matrices, and transformation procedures in `fem3d` 
 | **Bathe, K. J.** (1996). *Finite Element Procedures*. Prentice Hall. | Eigenvalue solvers, buckling |
 
 > **Note:** Items marked `# TODO: verify` in the source code or test files have computed values that need manual cross-check against your textbook, particularly for biaxial bending sign conventions (the $\theta_y$ sign) and moment reaction directions.
+
+---
+
+## Response Spectrum Analysis (RSA)
+
+`fem3d` supports spatial Response Spectrum Analysis with CQC/SRSS modal combinations and directional influence vectors:
+
+```python
+from fem3d import SimpleFrame
+
+frame = SimpleFrame()
+# ... build 3D nodes, elements, supports, and lumped masses ...
+
+# Execute 3D Response Spectrum Analysis along X direction
+rsa_x = frame.response_spectrum_analysis(
+    sds=1.0,
+    sd1=0.6,
+    tl=8.0,
+    n_modes=12,
+    direction="x",
+    scale_factor=386.09,
+    combination="CQC",
+)
+
+print("Modal Periods:", rsa_x["periods"])
+print("X Mass Participation (%):", rsa_x["mass_participation_ratio"] * 100)
+print("Combined Base Shear X (kips):", rsa_x["combined_base_shear"][0])
+
+# Access combined 3D internal forces on any member:
+# [P_i, V2_i, V3_i, T_i, M2_i, M3_i, P_j, V2_j, V3_j, T_j, M2_j, M3_j]
+col_forces = rsa_x["combined_element_forces"][1]
+print("Base Column Design Moment M3 (kip-in):", col_forces[5])
+```
 
 ---
 

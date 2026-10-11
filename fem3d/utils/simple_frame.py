@@ -87,7 +87,7 @@ class SimpleFrame:
         web_vector: Optional[Iterable] = None,
         nu: float = 0.3,
         G: Optional[float] = None,
-        extra_mass: float = 0.0,
+        mass: float = 0.0,
     ) -> FrameElement:
         """
         Add an elastic 3D beam-column frame element.
@@ -122,7 +122,7 @@ class SimpleFrame:
             Poisson's ratio. Defaults to 0.3.
         G : float, optional
             Shear modulus. If None, derived as E / (2*(1+nu)).
-        extra_mass : float, optional
+        mass : float, optional
             Distributed non-structural mass per unit length. Defaults to 0.0.
 
         Returns
@@ -152,8 +152,15 @@ class SimpleFrame:
         else:
             J_val = float(J)
 
-        mat = ElasticMaterial(E=E, nu=nu, G=G)
-        sec = Section(A=A, I2=i2_val, I3=i3_val, J=J_val)
+        if isinstance(E, ElasticMaterial):
+            mat = E
+        else:
+            mat = ElasticMaterial(E=E, nu=nu, G=G)
+
+        if isinstance(A, Section):
+            sec = A
+        else:
+            sec = Section(A=A, I2=i2_val, I3=i3_val, J=J_val)
 
         elem = FrameElement(
             eid=id,
@@ -163,7 +170,7 @@ class SimpleFrame:
             section=sec,
             roll_angle=roll_angle,
             web_vector=np.asarray(web_vector, dtype=float) if web_vector is not None else None,
-            extra_mass=extra_mass,
+            mass=mass,
         )
         self.structure.add_element(elem)
         return elem
@@ -175,7 +182,7 @@ class SimpleFrame:
         node_j_id: Union[int, str],
         E: float,
         A: float,
-        extra_mass: float = 0.0,
+        mass: float = 0.0,
     ) -> TrussElement:
         """
         Add an elastic 3D space truss element.
@@ -192,7 +199,7 @@ class SimpleFrame:
             Young's modulus.
         A : float
             Cross-sectional area.
-        extra_mass : float, optional
+        mass : float, optional
             Distributed mass. Defaults to 0.0.
 
         Returns
@@ -210,7 +217,7 @@ class SimpleFrame:
             node_j=node_j,
             material=mat,
             section=sec,
-            extra_mass=extra_mass,
+            mass=mass,
         )
         self.structure.add_element(elem)
         return elem
@@ -431,6 +438,13 @@ class SimpleFrame:
         Register modal analysis results on the structure.
         """
         return self.structure.set_modal_results(omega, phi)
+
+    def response_spectrum_analysis(self, **kwargs):
+        """
+        Perform 3D Response Spectrum Analysis on the structure.
+        """
+        return self.structure.response_spectrum_analysis(**kwargs)
+
 
 
 

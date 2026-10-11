@@ -39,15 +39,15 @@ def solved_portal_frame():
     J = 3e-4
 
     # Columns
-    frame.add_frame(1, 1, 5, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
-    frame.add_frame(2, 2, 6, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
-    frame.add_frame(3, 3, 7, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
-    frame.add_frame(4, 4, 8, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
+    frame.add_frame(1, 1, 5, E, A, I2=I2, I3=I3, J=J, mass=25.0)
+    frame.add_frame(2, 2, 6, E, A, I2=I2, I3=I3, J=J, mass=25.0)
+    frame.add_frame(3, 3, 7, E, A, I2=I2, I3=I3, J=J, mass=25.0)
+    frame.add_frame(4, 4, 8, E, A, I2=I2, I3=I3, J=J, mass=25.0)
     # Roof Beams
-    frame.add_frame(5, 5, 6, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
-    frame.add_frame(6, 6, 7, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
-    frame.add_frame(7, 7, 8, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
-    frame.add_frame(8, 8, 5, E, A, I2=I2, I3=I3, J=J, extra_mass=25.0)
+    frame.add_frame(5, 5, 6, E, A, I2=I2, I3=I3, J=J, mass=25.0)
+    frame.add_frame(6, 6, 7, E, A, I2=I2, I3=I3, J=J, mass=25.0)
+    frame.add_frame(7, 7, 8, E, A, I2=I2, I3=I3, J=J, mass=25.0)
+    frame.add_frame(8, 8, 5, E, A, I2=I2, I3=I3, J=J, mass=25.0)
 
     # Fixed base supports
     for nid in (1, 2, 3, 4):

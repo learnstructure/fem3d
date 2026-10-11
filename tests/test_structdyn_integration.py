@@ -195,3 +195,66 @@ def test_set_modal_results_and_mode_shape(sample_3d_portal_frame):
 
     drawer = DrawStructure(struct)
     assert drawer is not None
+
+
+def test_response_spectrum_analysis_3d(sample_3d_portal_frame):
+    """
+    Verify Response Spectrum Analysis on 3D frame using SimpleFrame and Structure.
+    """
+    frame = sample_3d_portal_frame
+    res_x = frame.response_spectrum_analysis(
+        sds=1.0,
+        sd1=0.6,
+        tl=8.0,
+        n_modes=6,
+        direction="x",
+        scale_factor=386.09,
+        combination="CQC",
+    )
+
+    assert "combined_base_shear" in res_x
+    assert res_x["combined_base_shear"][0] > 0.0
+    assert len(res_x["combined_element_forces"]) == len(frame.structure.elements)
+    assert "mass_participation_ratio" in res_x
+
+    # Test Y direction
+    res_y = frame.response_spectrum_analysis(
+        sds=1.0,
+        sd1=0.6,
+        tl=8.0,
+        n_modes=6,
+        direction="y",
+        scale_factor=386.09,
+        combination="CQC",
+    )
+    assert res_y["combined_base_shear"][0] > 0.0
+
+
+def test_response_spectrum_analysis_3d_ground_motion(sample_3d_portal_frame):
+    """
+    Verify Response Spectrum Analysis on 3D frame using GroundMotion object and string event name.
+    """
+    from structdyn import GroundMotion
+
+    frame = sample_3d_portal_frame
+
+    # 1. GroundMotion instance
+    gm_obj = GroundMotion.from_event("northridge", scale_factor=386.09)
+    res_obj = frame.response_spectrum_analysis(
+        gm=gm_obj,
+        n_modes=6,
+        direction="x",
+        scale_factor=386.09,
+    )
+    assert res_obj["combined_base_shear"][0] > 0.0
+
+    # 2. String event name directly ("elcentro")
+    res_str = frame.response_spectrum_analysis(
+        gm="elcentro",
+        n_modes=6,
+        direction="x",
+        scale_factor=386.09,
+    )
+    assert res_str["combined_base_shear"][0] > 0.0
+
+
