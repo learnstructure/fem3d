@@ -14,7 +14,7 @@ earthquake ground acceleration record.
 
 import numpy as np
 import pandas as pd
-from fem3d import SimpleFrame
+from fem3d import SimpleFrame, Section
 from structdyn import MDF, GroundMotion, elcentro_chopra
 
 # -------------------------------------------------------------------
@@ -30,18 +30,12 @@ E = 6000.0  # ksi
 nu = 0.2
 G = E / (2.0 * (1.0 + nu))  # 2500 ksi
 
-# Beam properties: 20 in x 35 in
-b_bm, d_bm = 20.0, 35.0
-A_bm = b_bm * d_bm
-I3_bm = (b_bm * d_bm**3) / 12.0
-I2_bm = (d_bm * b_bm**3) / 12.0
-J_bm = 0.3 * (b_bm**3) * d_bm
+# Section properties using exact rectangular elasticity theory (matching SAP2000):
+# Beams: 20 in x 35 in (J = 60,031.9 in^4)
+beam_section = Section.from_rectangle(width=20.0, depth=35.0)
 
-# Column properties: 20 in x 20 in
-b_col = 20.0
-A_col = b_col * b_col
-I_col = (b_col**4) / 12.0
-J_col = 0.141 * (b_col**4)
+# Columns: 20 in x 20 in (J = 22,533.3 in^4)
+col_section = Section.from_rectangle(width=20.0, depth=20.0)
 
 # -------------------------------------------------------------------
 # 2. Build 3D structure using SimpleFrame
@@ -78,7 +72,8 @@ for story in range(1, n_stories + 1):
         top_nid = upper_base + k
         frame.add_frame(
             elem_id, bot_nid, top_nid,
-            E=E, A=A_col, I2=I_col, I3=I_col, J=J_col, G=G,
+            E=E, G=G,
+            A=col_section.A, I2=col_section.I2, I3=col_section.I3, J=col_section.J,
         )
         elem_id += 1
 
@@ -94,13 +89,13 @@ for story in range(1, n_stories + 1):
     for n1, n2 in floor_pairs:
         frame.add_frame(
             elem_id, n1, n2,
-            E=E, A=A_bm, I2=I2_bm, I3=I3_bm, J=J_bm, G=G,
+            E=E, G=G,
+            A=beam_section.A, I2=beam_section.I2, I3=beam_section.I3, J=beam_section.J,
         )
         elem_id += 1
 
 # Lumped story masses (450 kips per story distributed equally)
 mass_per_node = (450.0 / 4.0) / g
-small_inertia = 1e-4
 
 for story in range(1, n_stories + 1):
     story_base = story * 4 + 1
@@ -108,7 +103,6 @@ for story in range(1, n_stories + 1):
         nid = story_base + k
         frame.structure.nodes[nid].set_mass(
             mass=[mass_per_node, mass_per_node, mass_per_node],
-            inertia=[small_inertia, small_inertia, small_inertia],
         )
 
 # -------------------------------------------------------------------

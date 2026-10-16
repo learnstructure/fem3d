@@ -2,7 +2,7 @@
 Structure module defining the 3D finite element model container, assembly, boundary conditions, and solvers.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from .nodes import Node
@@ -48,8 +48,9 @@ class Structure:
         Dictionary containing frequencies, periods, and mode shapes from modal analysis.
     """
 
-    def __init__(self):
+    def __init__(self, units: Optional[Union[Any, str]] = None):
         """Initialize an empty 3D Structure container."""
+        self.units = units
         self.nodes: Dict[Union[int, str], Node] = {}
         self.elements: Dict[Union[int, str], ElementBase] = {}
         self.loads: List = []
@@ -75,6 +76,14 @@ class Structure:
     def add_load(self, load):
         """Add a load (PointLoad, DistributedLoad, etc.) to the structure."""
         self.loads.append(load)
+
+    def apply_self_weight(self, direction: str = "-z", gravity_accel: Optional[float] = None, units: Optional[Union[Any, str]] = None):
+        """
+        Materialize element self-weight distributed loads directly onto all elements.
+        Uses `struct_load.engine.self_weight.apply_self_weight`.
+        """
+        from struct_load.engine.self_weight import apply_self_weight as _apply_sw
+        return _apply_sw(self, direction=direction, gravity_accel=gravity_accel, units=units)
 
     def number_dofs(self):
         """
@@ -521,5 +530,32 @@ class Structure:
             "combination_method": combination,
         }
         return self.rsa_results
+
+    def apply_self_weight(
+        self,
+        direction: str = "-z",
+        gravity_accel: Optional[float] = None,
+        units: Optional[Any] = None,
+    ) -> "Structure":
+        """
+        Compute and apply element self-weight distributed loads directly to the structure.
+
+        Parameters
+        ----------
+        direction : str, optional
+            Gravity direction in global coordinates ('-z', '-y', '-x'). Defaults to '-z'.
+        gravity_accel : float, optional
+            Acceleration due to gravity. If None, derived from structure.units.
+        units : str or Units, optional
+            Units for calculation. If None, uses structure.units.
+
+        Returns
+        -------
+        Structure
+            self (for chaining).
+        """
+        from struct_load import apply_self_weight as _apply_sw
+        return _apply_sw(self, direction=direction, gravity_accel=gravity_accel, units=units)
+
 
 

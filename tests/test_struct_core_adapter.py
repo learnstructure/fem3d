@@ -225,3 +225,145 @@ def test_model_from_core_mass_source():
     assert modal["periods"][0] > 0.0
 
 
+@pytest.mark.skipif(not HAS_STRUCT_CORE, reason="struct_core not installed")
+def test_model_from_core_3d_consistent_mass_conversion():
+    """Verify 3D materials with rho in kg/m^3 and nodes with mass in kg convert to consistent metric tonnes."""
+    from struct_core import (
+        StructuralModel,
+        Node,
+        Support,
+        ElasticMaterial,
+        RectangularSection,
+        BeamElement,
+    )
+
+    mat = ElasticMaterial(id="Conc", E=2.5e7, rho=2400.0)
+    sec = RectangularSection(id="ColSec", b=0.4, h=0.4)
+    nodes = [
+        Node(id=1, x=0.0, y=0.0, z=0.0),
+        Node(id=2, x=0.0, y=0.0, z=3.5, mass=5000.0),
+    ]
+    elements = [
+        BeamElement(id=1, start_node=1, end_node=2, material_id="Conc", section_id="ColSec"),
+    ]
+    supports = [Support(node_id=1, ux=True, uy=True, uz=True, rx=True, ry=True, rz=True)]
+    model = StructuralModel(nodes=nodes, materials=[mat], sections=[sec], elements=elements, supports=supports)
+
+    struct = model_from_core(model)
+    # Density should be converted from 2400.0 kg/m^3 to 2.4 tonne/m^3
+    assert pytest.approx(struct.elements[1].material.rho, rel=1e-5) == 2.4
+    # Node mass should be converted from 5000.0 kg to 5.0 tonnes
+    assert pytest.approx(struct.nodes[2].mass[0], rel=1e-5) == 5.0
+
+    modal = struct.modal_analysis(num_modes=1)
+    T1 = modal["periods"][0]
+    assert 0.05 < T1 < 0.3, f"Expected realistic period ~0.1s, got {T1}s"
+
+
+@pytest.mark.skipif(not HAS_STRUCT_CORE, reason="struct_core not installed")
+def test_model_from_core_load_cases_filtering():
+    """Verify default sum of all load cases and explicit load case selection."""
+    from struct_core import (
+        StructuralModel,
+        Node,
+        Support,
+        ElasticMaterial,
+        RectangularSection,
+        BeamElement,
+        PointLoad,
+        LoadCase,
+    )
+
+    nodes = [
+        Node(id=1, x=0.0, y=0.0, z=0.0),
+        Node(id=2, x=0.0, y=0.0, z=3.0),
+    ]
+    mat = ElasticMaterial(id="M1", E=3e7, nu=0.2)
+    sec = RectangularSection(id="S1", b=0.3, h=0.3)
+    elements = [
+        BeamElement(id=1, start_node=1, end_node=2, material_id="M1", section_id="S1"),
+    ]
+    supports = [Support(node_id=1, ux=True, uy=True, uz=True, rx=True, ry=True, rz=True)]
+
+    lc_dead = LoadCase(id="DEAD", name="Dead Load", point_loads=[PointLoad(node_id=2, fz=-100.0)])
+    lc_live = LoadCase(id="LIVE", name="Live Load", point_loads=[PointLoad(node_id=2, fz=-50.0)])
+
+    model = StructuralModel(
+        nodes=nodes,
+        materials=[mat],
+        sections=[sec],
+        elements=elements,
+        supports=supports,
+        load_cases=[lc_dead, lc_live],
+    )
+
+    # 1. Default: all cases transferred (summed: -100 + -50 = -150)
+    struct_all = model_from_core(model)
+    struct_all.solve()
+    assert pytest.approx(struct_all.reactions[struct_all.nodes[1].dofs[2]], rel=1e-5) == 150.0
+
+    # 2. Explicit 'DEAD' only
+    struct_dead = model_from_core(model, load_case_id="DEAD")
+    struct_dead.solve()
+    assert pytest.approx(struct_dead.reactions[struct_dead.nodes[1].dofs[2]], rel=1e-5) == 100.0
+
+    # 3. Explicit 'LIVE' only
+    struct_live = model_from_core(model, load_case_id="LIVE")
+    struct_live.solve()
+    assert pytest.approx(struct_live.reactions[struct_live.nodes[1].dofs[2]], rel=1e-5) == 50.0
+
+    # 4. Explicit list of cases ['DEAD', 'LIVE']
+    struct_list = model_from_core(model, load_case_id=["DEAD", "LIVE"])
+    struct_list.solve()
+    assert pytest.approx(struct_list.reactions[struct_list.nodes[1].dofs[2]], rel=1e-5) == 150.0
+
+    # 5. Invalid case raises ValueError
+    with pytest.raises(ValueError):
+        model_from_core(model, load_case_id="WIND")
+
+
+@pytest.mark.skipif(not HAS_STRUCT_CORE, reason="struct_core not installed")
+def test_ecosystem_roundtrip_units_and_unit_weight():
+    """Verify units and unit_weight survive model_to_core -> apply_self_weight -> model_from_core."""
+    from fem3d import Structure, Node, ElasticMaterial, Section, FrameElement, DistributedLoad
+    from fem3d.adapters import model_to_core, model_from_core
+    from struct_load import apply_self_weight
+
+    struct = Structure(units="kN, m")
+    n1 = Node(1, 0.0, 0.0, 0.0)
+    n1.set_support([1, 1, 1, 1, 1, 1])
+    n2 = Node(2, 5.0, 0.0, 0.0)
+    struct.add_node(n1)
+    struct.add_node(n2)
+
+    mat = ElasticMaterial(E=30e6, nu=0.2, unit_weight=24.0)
+    sec = Section.from_rectangle(width=0.3, depth=0.5)  # A = 0.15 m^2
+    elem = FrameElement(1, n1, n2, material=mat, section=sec)
+    struct.add_element(elem)
+
+    # Superimposed live load
+    struct.add_load(DistributedLoad(elem, wz=-10.0, coord_system="global"))
+
+    # Convert to struct_core
+    core_model = model_to_core(struct)
+    assert core_model.units.force == "kN"
+    assert core_model.units.length == "m"
+    assert core_model.materials[0].unit_weight == 24.0
+
+    # Apply self weight: w = 24.0 * 0.15 = 3.6 kN/m
+    core_model = apply_self_weight(core_model)
+    dead_case = next(lc for lc in core_model.load_cases if lc.id == "DEAD")
+    assert len(dead_case.element_loads) == 1
+    assert pytest.approx(dead_case.element_loads[0].wz, rel=1e-5) == -3.6
+
+    # Convert back to fem3d Structure
+    struct_rebuilt = model_from_core(core_model)
+    assert struct_rebuilt.units.force == "kN"
+    assert struct_rebuilt.elements[1].material.unit_weight == 24.0
+    # Both DEAD and LIVE transferred: total w = -10.0 + -3.6 = -13.6 kN/m, total load = 5.0 * 13.6 = 68.0 kN
+    disp, reac = struct_rebuilt.solve()
+    assert pytest.approx(reac[struct_rebuilt.nodes[1].dofs[2]], rel=1e-5) == 68.0
+
+
+
+

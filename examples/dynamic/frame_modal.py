@@ -14,6 +14,7 @@ A 4-story, 1-bay by 1-bay 3D reinforced concrete space frame:
 - Columns: 20 in x 20 in square section
 - Beams:   20 in x 35 in rectangular section
 - Floor lumped mass: 450 kips per story distributed to the 4 corner nodes
+- Periods from SAP2000: 0.523277, 0.523277, 0.474247, 0.172492, 0.172492, 0.159199 s
 """
 
 import math
@@ -45,21 +46,12 @@ nu = 0.2
 G = E / (2.0 * (1.0 + nu))  # 2500 ksi
 material = ElasticMaterial(E=E, G=G, rho=0.0)
 
-# Section properties
-# Beams: 20 in x 35 in
-b_bm, d_bm = 20.0, 35.0
-A_bm = b_bm * d_bm
-I3_bm = (b_bm * d_bm**3) / 12.0  # Strong axis bending (Z-axis transverse)
-I2_bm = (d_bm * b_bm**3) / 12.0  # Weak axis bending
-J_bm = 0.3 * (b_bm**3) * d_bm
-beam_section = Section(A=A_bm, I2=I2_bm, I3=I3_bm, J=J_bm)
+# Section properties using exact rectangular elasticity theory (matching SAP2000):
+# Beams: 20 in x 35 
+beam_section = Section.from_rectangle(width=20.0, depth=35.0)
 
-# Columns: 20 in x 20 in
-b_col = 20.0
-A_col = b_col * b_col
-I_col = (b_col**4) / 12.0
-J_col = 0.141 * (b_col**4)
-col_section = Section(A=A_col, I2=I_col, I3=I_col, J=J_col)
+# Columns: 20 in x 20 in 
+col_section = Section.from_rectangle(width=20.0, depth=20.0)
 
 # -------------------------------------------------------------------
 # 2. Build 3D structure using SimpleFrame
@@ -98,7 +90,8 @@ for story in range(1, n_stories + 1):
         top_nid = upper_base + k
         frame.add_frame(
             elem_id, bot_nid, top_nid,
-            E=E, A=A_col, I2=I_col, I3=I_col, J=J_col, G=G,
+            E=E, G=G,
+            A=col_section.A, I2=col_section.I2, I3=col_section.I3, J=col_section.J,
         )
         elem_id += 1
 
@@ -114,7 +107,8 @@ for story in range(1, n_stories + 1):
     for n1, n2 in floor_pairs:
         frame.add_frame(
             elem_id, n1, n2,
-            E=E, A=A_bm, I2=I2_bm, I3=I3_bm, J=J_bm, G=G,
+            E=E, G=G,
+            A=beam_section.A, I2=beam_section.I2, I3=beam_section.I3, J=beam_section.J,
         )
         elem_id += 1
 
@@ -122,8 +116,8 @@ for story in range(1, n_stories + 1):
 # 3. Lumped floor masses
 # -------------------------------------------------------------------
 # Each floor carries 450 kips, distributed equally among 4 corner nodes
+# Rotational inertia is zero (massless rotational DOFs are condensed exactly via Guyan reduction in structdyn)
 mass_per_node = (450.0 / 4.0) / g  # kips*s^2/in
-small_inertia = 1e-4
 
 for story in range(1, n_stories + 1):
     story_base = story * 4 + 1
@@ -131,7 +125,6 @@ for story in range(1, n_stories + 1):
         nid = story_base + k
         frame.structure.nodes[nid].set_mass(
             mass=[mass_per_node, mass_per_node, mass_per_node],
-            inertia=[small_inertia, small_inertia, small_inertia],
         )
 
 # -------------------------------------------------------------------

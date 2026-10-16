@@ -373,25 +373,29 @@ sec = Section.from_i_shape(bf=6.0, tf=0.5, d=10.0, tw=0.3)
 ```python
 from fem3d import Structure, Node, ElasticMaterial, Section, FrameElement, PointLoad
 
-s = Structure()
+# Initialize structure with canonical engineering units
+s = Structure(units="kN, m")
 
 # Add nodes
 n1 = Node(1, 0, 0, 0)
-n2 = Node(2, 0, 0, 120)   # vertical column, 120 in. tall
+n2 = Node(2, 0, 0, 3.5)   # vertical column, 3.5 m tall
 s.add_node(n1)
 s.add_node(n2)
 
-# Set support
+# Set support: 6 DOFs [ux, uy, uz, rx, ry, rz]
 n1.set_support([1, 1, 1, 1, 1, 1])   # fixed base
 
-# Add element
-mat = ElasticMaterial(E=29000.0)
-sec = Section(A=14.7, I2=272.0, I3=984.0, J=3.01)
-el = FrameElement(1, n1, n2, mat, sec)
+# Add element: E, nu, unit_weight (G is automatically derived)
+mat = ElasticMaterial(E=30.0e6, nu=0.20, unit_weight=24.0)
+sec = Section.from_rectangle(width=0.30, depth=0.40)
+el = FrameElement(1, n1, n2, mat, sec, include_shear_deformation=True)
 s.add_element(el)
 
 # Add load
 s.add_load(PointLoad(n2, fx=10.0, fy=5.0))
+
+# Apply continuous self-weight line loads directly
+s.apply_self_weight(direction="-z")
 
 # Solve
 disp, reactions = s.solve()
@@ -617,25 +621,34 @@ The critical load = $\lambda_{cr} \times$ applied load. The geometric stiffness 
 
 ## struct_core Adapter
 
-Bidirectional conversion with `struct_core` models and results:
+Bidirectional conversion with `struct_core` models and results with seamless unit preservation:
 
 ```python
 from fem3d import model_from_core, model_to_core, result_to_core
+from struct_load import apply_self_weight
 import struct_core as sc
 
-# fem3d -> struct_core
+# 1. fem3d -> struct_core
+# Automatically preserves active units (e.g. 'kN, m'). Existing loads are
+# mapped to 'LIVE' by default, reserving 'DEAD' for automated self-weight.
 sc_model = model_to_core(frame)          # SimpleFrame or Structure
 sc_result = result_to_core(results)      # Results object or structure
 
-# struct_core -> fem3d
+# 2. Add self-weight via struct_load engine
+sc_model = apply_self_weight(sc_model)
+
+# 3. struct_core -> fem3d
+# By default, transfers and sums all load cases (DEAD + LIVE).
+# Users can also filter explicitly via load_case_id="DEAD".
 structure = model_from_core(
     sc_model,
+    load_case_id=None,                   # None = sum all load cases; or specify case ID
     mass_source=sc_model.mass_source,    # evaluate dynamic inertial mass (e.g. 1.0D + 0.25L)
     include_self_weight=True,            # automatically computes element self-weight via struct_load
     include_shear_deformation=True,     # consider Timoshenko shear flexibility (As2, As3)
 )
 
-# Support mapping (struct_core.Support now supports full 6 DOF):
+# Support mapping (struct_core.Support supports full 6 DOF):
 #   fem3d [ux, uy, uz, rx, ry, rz] <-> struct_core Support {ux, uy, uz, rx, ry, rz}
 
 # Section & Timoshenko Shear Areas:
@@ -646,6 +659,13 @@ structure = model_from_core(
 #   node_results: Dict[NodeId, NodeResult] with NodeDisplacement (6 DOF) + NodeReaction (6 DOF)
 #   element_results: Dict[ElementId, ElementResult] with BeamSectionForce at i and j ends
 ```
+
+### Benchmark Examples
+
+- [`examples/linear/frame_gravity_lateral.py`](examples/linear/frame_gravity_lateral.py) — 2-story 3D RC space frame under gravity + lateral loads, validated against SAP2000.
+- [`examples/linear/frame_gravity_lateral_dead.py`](examples/linear/frame_gravity_lateral_dead.py) — Same 3D RC frame with automated dead load / self-weight materialized via `struct_core` and `struct_load`, validated against SAP2000.
+- [`examples/linear/frame_gravity_lateral_dead_min.py`](examples/linear/frame_gravity_lateral_dead_min.py) — Minimal replica demonstrating direct `struct.apply_self_weight()` solver execution.
+
 
 ---
 

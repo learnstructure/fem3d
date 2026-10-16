@@ -2,7 +2,7 @@
 SimpleFrame module providing a convenient, high-level API for creating and solving 3D frame and truss models.
 """
 
-from typing import Iterable, Optional, Tuple, Union
+from typing import Any, Iterable, Optional, Tuple, Union
 import numpy as np
 
 from ..nodes import Node
@@ -37,11 +37,50 @@ class SimpleFrame:
     ----------
     structure : Structure
         The underlying Structure instance.
+    units : Units or str, optional
+        Canonical unit specification attached to the structure.
     """
 
-    def __init__(self):
+    def __init__(self, units: Optional[Union[Any, str]] = None):
         """Initialize a SimpleFrame wrapper with an empty Structure."""
-        self.structure = Structure()
+        self.structure = Structure(units=units)
+
+    @property
+    def units(self):
+        """Active engineering units on the underlying Structure."""
+        return self.structure.units
+
+    @units.setter
+    def units(self, value):
+        self.structure.units = value
+
+    def apply_self_weight(
+        self,
+        direction: str = "-z",
+        gravity_accel: Optional[float] = None,
+        units: Optional[Any] = None,
+    ):
+        """
+        Materialize element self-weight distributed loads directly onto the structure.
+
+        Parameters
+        ----------
+        direction : str, optional
+            Gravity direction in global coordinates ('-z', '-y', '-x'). Defaults to '-z'.
+        gravity_accel : float, optional
+            Acceleration due to gravity. If None, derived from units.
+        units : str or Units, optional
+            Units for calculation. If None, uses structure.units.
+
+        Returns
+        -------
+        SimpleFrame
+            self (for chaining).
+        """
+        self.structure.apply_self_weight(
+            direction=direction, gravity_accel=gravity_accel, units=units
+        )
+        return self
 
     def add_node(
         self,
@@ -79,7 +118,7 @@ class SimpleFrame:
         node_i_id: Union[int, str],
         node_j_id: Union[int, str],
         E: float,
-        A: float,
+        A: Optional[Union[float, Section]] = None,
         I2: Optional[float] = None,
         I3: Optional[float] = None,
         J: Optional[float] = None,
@@ -88,6 +127,12 @@ class SimpleFrame:
         nu: float = 0.3,
         G: Optional[float] = None,
         mass: float = 0.0,
+        include_shear_deformation: bool = False,
+        section: Optional[Section] = None,
+        As2: Optional[float] = None,
+        As3: Optional[float] = None,
+        rho: Optional[float] = None,
+        unit_weight: Optional[float] = None,
     ) -> FrameElement:
         """
         Add an elastic 3D beam-column frame element.
@@ -100,10 +145,10 @@ class SimpleFrame:
             Start node identifier (node i).
         node_j_id : int or str
             End node identifier (node j).
-        E : float
-            Young's modulus.
-        A : float
-            Cross-sectional area.
+        E : float or ElasticMaterial
+            Young's modulus or ElasticMaterial instance.
+        A : float or Section, optional
+            Cross-sectional area or Section instance.
         I2 : float, optional
             Second moment of area about local 2-axis (resists bending in local 1-3 plane).
             If omitted and I3 is given, set equal to I3.
@@ -124,6 +169,18 @@ class SimpleFrame:
             Shear modulus. If None, derived as E / (2*(1+nu)).
         mass : float, optional
             Distributed non-structural mass per unit length. Defaults to 0.0.
+        include_shear_deformation : bool, optional
+            Whether to include Timoshenko shear deformation. Defaults to False.
+        section : Section, optional
+            Section instance defining cross-sectional properties. Defaults to None.
+        As2 : float, optional
+            Shear area along local 2-axis. Defaults to None.
+        As3 : float, optional
+            Shear area along local 3-axis. Defaults to None.
+        rho : float, optional
+            Mass density. Defaults to None.
+        unit_weight : float, optional
+            Weight density. Defaults to None.
 
         Returns
         -------
@@ -155,12 +212,16 @@ class SimpleFrame:
         if isinstance(E, ElasticMaterial):
             mat = E
         else:
-            mat = ElasticMaterial(E=E, nu=nu, G=G)
+            mat = ElasticMaterial(E=E, nu=nu, G=G, rho=rho, unit_weight=unit_weight)
 
-        if isinstance(A, Section):
+        if section is not None:
+            sec = section
+        elif isinstance(A, Section):
             sec = A
         else:
-            sec = Section(A=A, I2=i2_val, I3=i3_val, J=J_val)
+            if A is None:
+                raise ValueError("Must provide either 'A' or 'section'.")
+            sec = Section(A=float(A), I2=i2_val, I3=i3_val, J=J_val, As2=As2, As3=As3)
 
         elem = FrameElement(
             eid=id,
@@ -171,6 +232,7 @@ class SimpleFrame:
             roll_angle=roll_angle,
             web_vector=np.asarray(web_vector, dtype=float) if web_vector is not None else None,
             mass=mass,
+            include_shear_deformation=include_shear_deformation,
         )
         self.structure.add_element(elem)
         return elem
@@ -180,9 +242,12 @@ class SimpleFrame:
         id: Union[int, str],
         node_i_id: Union[int, str],
         node_j_id: Union[int, str],
-        E: float,
-        A: float,
+        E: Union[float, ElasticMaterial],
+        A: Union[float, Section],
         mass: float = 0.0,
+        nu: float = 0.3,
+        rho: Optional[float] = None,
+        unit_weight: Optional[float] = None,
     ) -> TrussElement:
         """
         Add an elastic 3D space truss element.
@@ -195,12 +260,18 @@ class SimpleFrame:
             Start node identifier.
         node_j_id : int or str
             End node identifier.
-        E : float
-            Young's modulus.
-        A : float
-            Cross-sectional area.
+        E : float or ElasticMaterial
+            Young's modulus or ElasticMaterial.
+        A : float or Section
+            Cross-sectional area or Section instance.
         mass : float, optional
             Distributed mass. Defaults to 0.0.
+        nu : float, optional
+            Poisson's ratio. Defaults to 0.3.
+        rho : float, optional
+            Mass density. Defaults to None.
+        unit_weight : float, optional
+            Weight density. Defaults to None.
 
         Returns
         -------
@@ -209,8 +280,16 @@ class SimpleFrame:
         """
         node_i = self.structure.nodes[node_i_id]
         node_j = self.structure.nodes[node_j_id]
-        mat = ElasticMaterial(E=E)
-        sec = Section(A=A)
+        if isinstance(E, ElasticMaterial):
+            mat = E
+        else:
+            mat = ElasticMaterial(E=E, nu=nu, rho=rho, unit_weight=unit_weight)
+
+        if isinstance(A, Section):
+            sec = A
+        else:
+            sec = Section(A=float(A))
+
         elem = TrussElement(
             eid=id,
             node_i=node_i,

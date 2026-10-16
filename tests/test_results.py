@@ -40,3 +40,27 @@ def test_results_and_create_report():
     assert "Node Support & Load Conditions" in report
     assert "Global Structure Stiffness Matrix K" in report
     assert "Element Local End Forces" in report
+
+
+def test_simple_frame_units_and_self_weight_3d():
+    """Verify 3D SimpleFrame accepts units and can materialize self-weight."""
+    frame = SimpleFrame(units="kN, m")
+    assert frame.units == "kN, m"
+    assert frame.structure.units == "kN, m"
+
+    frame.add_node(1, 0.0, 0.0, 0.0)
+    frame.add_node(2, 6.0, 0.0, 0.0)
+    frame.add_frame(1, 1, 2, E=30e6, A=0.12, I2=0.0016, I3=0.0025, unit_weight=25.0)
+    frame.add_support(1, [1, 1, 1, 1, 1, 1])
+    frame.add_support(2, [1, 1, 1, 1, 1, 1])
+
+    frame.apply_self_weight(direction="-z")
+    assert len(frame.structure.loads) == 1
+    load = frame.structure.loads[0]
+    # w = 0.12 * 25.0 = 3.0 kN/m
+    assert abs(load.w3 - (-3.0)) < 1e-9 or abs(load.w2 - (-3.0)) < 1e-9
+
+    disp, reac = frame.solve()
+    assert disp is not None
+    assert reac is not None
+

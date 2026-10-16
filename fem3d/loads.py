@@ -177,14 +177,13 @@ class DistributedLoad(ElementLoad):
         if sys_spec == "global":
             # Explicitly global requested
             if has_local and not has_global:
-                # Positional backward compatibility: DistributedLoad(el, 0, 0, -10, coord_system="global")
-                gx = float(w1 or 0.0)
-                gy = float(w2 or 0.0)
-                gz = float(w3 or 0.0)
-            else:
-                gx = float(wx or 0.0)
-                gy = float(wy or 0.0)
-                gz = float(wz or 0.0)
+                raise ValueError(
+                    f"coord_system='global' was specified, but local components (w1={w1}, w2={w2}, w3={w3}) were provided. "
+                    "Use wx, wy, wz for global coordinates."
+                )
+            gx = float(wx or 0.0)
+            gy = float(wy or 0.0)
+            gz = float(wz or 0.0)
             self._set_from_global(gx, gy, gz)
         elif sys_spec == "local":
             # Explicitly local requested
@@ -398,20 +397,16 @@ class ElementPointLoad(ElementLoad):
 
         if sys_spec == "global":
             if has_local and not has_global:
-                # Positional backward compatibility with coord_system="global"
-                gx = float(p1 or 0.0)
-                gy = float(p2 or 0.0)
-                gz = float(p3 or 0.0)
-                gmx = float(m1 or 0.0)
-                gmy = float(m2 or 0.0)
-                gmz = float(m3 or 0.0)
-            else:
-                gx = float(px or 0.0)
-                gy = float(py or 0.0)
-                gz = float(pz or 0.0)
-                gmx = float(mx or 0.0)
-                gmy = float(my or 0.0)
-                gmz = float(mz or 0.0)
+                raise ValueError(
+                    "coord_system='global' was specified, but local components (p1, p2, p3, m1, m2, m3) were provided. "
+                    "Use px, py, pz, mx, my, mz for global coordinates."
+                )
+            gx = float(px or 0.0)
+            gy = float(py or 0.0)
+            gz = float(pz or 0.0)
+            gmx = float(mx or 0.0)
+            gmy = float(my or 0.0)
+            gmz = float(mz or 0.0)
             self._set_from_global(gx, gy, gz, gmx, gmy, gmz)
         elif sys_spec == "local":
             if has_global and not has_local:
