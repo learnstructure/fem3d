@@ -87,7 +87,7 @@ class SpringElement(ElementBase):
         """Return 12x12 stiffness."""
         return self.global_stiffness()
 
-    def local_mass_matrix(self, lumped: bool = False) -> np.ndarray:
+    def local_mass_matrix(self, lumped: bool = False, include_rotational_inertia: bool = False) -> np.ndarray:
         """Spring has zero mass by default."""
         return np.zeros((12, 12), dtype=float)
 

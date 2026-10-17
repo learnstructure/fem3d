@@ -16,6 +16,7 @@ from fem3d import (
     ElasticMaterial,
     SimpleFrame,
 )
+from struct_load import SeismicParameters
 
 # -----------------------------------------------------------------------------
 # 1. Geometry and Material Properties (Units: kips, inches, seconds)
@@ -120,10 +121,10 @@ print("=" * 70)
 # 3. RSA along Global X Direction (ASCE 7 Design Spectrum)
 # -----------------------------------------------------------------------------
 print("\n--- [Analysis 1] Seismic Response in X Direction (ASCE 7) ---")
+asce_params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", damping_ratio=0.05)
+
 rsa_x = frame.response_spectrum_analysis(
-    sds=1.0,
-    sd1=0.6,
-    tl=8.0,
+    params=asce_params,
     n_modes=12,
     direction="x",
     scale_factor=g,
@@ -149,9 +150,7 @@ print(f"Total Combined Base Shear in X (Vbx): {vb_x:.2f} kips")
 # -----------------------------------------------------------------------------
 print("\n--- [Analysis 2] Seismic Response in Y Direction (ASCE 7) ---")
 rsa_y = frame.response_spectrum_analysis(
-    sds=1.0,
-    sd1=0.6,
-    tl=8.0,
+    params=asce_params,
     n_modes=12,
     direction="y",
     scale_factor=g,

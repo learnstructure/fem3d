@@ -110,7 +110,7 @@ class TrussElement(ElementBase):
 
         return K_g
 
-    def local_mass_matrix(self, lumped: bool = False) -> np.ndarray:
+    def local_mass_matrix(self, lumped: bool = False, include_rotational_inertia: bool = False) -> np.ndarray:
         """Return 12x12 mass matrix in local coordinates."""
         L = self.length
         total_density = self.material.rho * self.area + self.mass

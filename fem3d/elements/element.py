@@ -248,13 +248,13 @@ class ElementBase:
         T = self.transformation_matrix()
         return T.T @ k_local @ T
 
-    def local_mass_matrix(self, lumped: bool = False) -> np.ndarray:
+    def local_mass_matrix(self, lumped: bool = False, include_rotational_inertia: bool = False) -> np.ndarray:
         """Return element mass matrix in local coordinates. Subclasses implement."""
         raise NotImplementedError
 
-    def mass_matrix(self, lumped: bool = False) -> np.ndarray:
+    def mass_matrix(self, lumped: bool = False, include_rotational_inertia: bool = False) -> np.ndarray:
         """Return element mass matrix in global coordinates."""
-        m_local = self.local_mass_matrix(lumped=lumped)
+        m_local = self.local_mass_matrix(lumped=lumped, include_rotational_inertia=include_rotational_inertia)
         T = self.transformation_matrix()
         return T.T @ m_local @ T
 

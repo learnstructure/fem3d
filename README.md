@@ -801,10 +801,9 @@ frame = SimpleFrame()
 # ... build 3D nodes, elements, supports, and lumped masses ...
 
 # Execute 3D Response Spectrum Analysis along X direction
+params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", damping_ratio=0.05)
 rsa_x = frame.response_spectrum_analysis(
-    sds=1.0,
-    sd1=0.6,
-    tl=8.0,
+    params=params,
     n_modes=12,
     direction="x",
     scale_factor=386.09,
@@ -847,6 +846,25 @@ analysis_result = result_to_core(structure, analysis_case_id="Static_3D")
 
 ---
 
+## Examples
+
+The `examples/` directory contains complete, verified runnable scripts:
+
+### Linear Static & Code Procedures (`examples/linear/`)
+- `rc_frame_model.py`: Reusable canonical 2-story 3D RC Space Frame model constructor (`create_rc_frame` and `create_rc_frame_core`).
+- `frame_elf.py`: ASCE 7-16 / 7-22 Section 12.8 Equivalent Lateral Force (ELF) seismic analysis using `struct_core`, `struct_load.LoadGenerator.apply_lateral_seismic`, and `fem3d.adapters.model_from_core` with Mass Source multipliers (1.0 SuperDead + 0.25 LIVE), base shear $V$, base reactions, and upper story displacements.
+- `frame_gravity_lateral_dead.py`: 3D RC Space Frame under combined gravity, lateral loads, and automated element self-weight via `struct_load`.
+- `frame_gravity_lateral_dead_min.py`: Minimal replica applying direct self-weight.
+- `frame_gravity_lateral.py`: 3D frame under gravity and lateral loads.
+- `frame_58.py`, `frame_84.py`, `truss_81.py`: Benchmark frames and trusses.
+
+### Dynamic Analysis (`examples/dynamic/`)
+- `02_response_spectrum_analysis_3d.py`: 3D Response Spectrum Analysis using structdyn modal engine.
+- `03_mass_source_modal_analysis.py`: 3D modal analysis with commercial mass source definitions.
+- `frame_modal.py`, `frame_modal_Timoshenko.py`, `frame_th.py`: Modal and time history analyses.
+
+---
+
 ## Running Tests
 
 ```bash
@@ -855,5 +873,6 @@ cd fem3d
 pytest -v
 ```
 
-All 28 tests pass cleanly.
+All 52 tests pass cleanly.
+
 

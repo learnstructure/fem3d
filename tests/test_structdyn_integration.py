@@ -201,11 +201,12 @@ def test_response_spectrum_analysis_3d(sample_3d_portal_frame):
     """
     Verify Response Spectrum Analysis on 3D frame using SimpleFrame and Structure.
     """
+    from struct_load import SeismicParameters
+
     frame = sample_3d_portal_frame
+    params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", damping_ratio=0.05)
     res_x = frame.response_spectrum_analysis(
-        sds=1.0,
-        sd1=0.6,
-        tl=8.0,
+        params=params,
         n_modes=6,
         direction="x",
         scale_factor=386.09,
@@ -219,9 +220,7 @@ def test_response_spectrum_analysis_3d(sample_3d_portal_frame):
 
     # Test Y direction
     res_y = frame.response_spectrum_analysis(
-        sds=1.0,
-        sd1=0.6,
-        tl=8.0,
+        params=params,
         n_modes=6,
         direction="y",
         scale_factor=386.09,

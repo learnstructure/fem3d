@@ -210,7 +210,7 @@ core_model = model_to_core(struct)
 
 # Materialize self-weight distributed loads into DEAD load case
 # (Infers gravity direction '-z' and unit system from core_model automatically)
-core_model = apply_self_weight(core_model)
+core_model = apply_self_weight(core_model, target_case_id="DEAD")
 
 # Re-import from struct_core into analysis model.
 # By default, model_from_core transfers and sums all load cases (DEAD + LIVE).

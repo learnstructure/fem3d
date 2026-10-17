@@ -352,15 +352,15 @@ def test_ecosystem_roundtrip_units_and_unit_weight():
 
     # Apply self weight: w = 24.0 * 0.15 = 3.6 kN/m
     core_model = apply_self_weight(core_model)
-    dead_case = next(lc for lc in core_model.load_cases if lc.id == "DEAD")
-    assert len(dead_case.element_loads) == 1
-    assert pytest.approx(dead_case.element_loads[0].wz, rel=1e-5) == -3.6
+    sw_case = next(lc for lc in core_model.load_cases if lc.id in ("DEAD", "SelfWeight"))
+    assert len(sw_case.element_loads) == 1
+    assert pytest.approx(sw_case.element_loads[0].wz, rel=1e-5) == -3.6
 
     # Convert back to fem3d Structure
     struct_rebuilt = model_from_core(core_model)
     assert struct_rebuilt.units.force == "kN"
     assert struct_rebuilt.elements[1].material.unit_weight == 24.0
-    # Both DEAD and LIVE transferred: total w = -10.0 + -3.6 = -13.6 kN/m, total load = 5.0 * 13.6 = 68.0 kN
+    # Both SelfWeight and LIVE transferred: total w = -10.0 + -3.6 = -13.6 kN/m, total load = 5.0 * 13.6 = 68.0 kN
     disp, reac = struct_rebuilt.solve()
     assert pytest.approx(reac[struct_rebuilt.nodes[1].dofs[2]], rel=1e-5) == 68.0
 

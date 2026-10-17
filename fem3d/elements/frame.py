@@ -300,9 +300,18 @@ class FrameElement(ElementBase):
                 k_new[r_i, r_j] = K_r_star[i_idx, j_idx]
         return k_new
 
-    def local_mass_matrix(self, lumped: bool = False) -> np.ndarray:
+    def local_mass_matrix(self, lumped: bool = False, include_rotational_inertia: bool = False) -> np.ndarray:
         """
         Return the 12x12 element mass matrix in local coordinates.
+
+        Parameters
+        ----------
+        lumped : bool, optional
+            If True, returns diagonal lumped mass matrix. Defaults to False.
+        include_rotational_inertia : bool, optional
+            If True and lumped=True, includes rotational inertia on rotational DOFs.
+            If False (default), rotational DOFs have zero mass, matching standard building frame
+            software (SAP2000, ETABS) where rotational DOFs are condensed via Guyan reduction.
 
         References:
         - Przemieniecki, J. S. (1968). Theory of Matrix Structural Analysis.
@@ -327,14 +336,15 @@ class FrameElement(ElementBase):
             m[7, 7] = m_half
             m[8, 8] = m_half
 
-            # Rotational lumped inertias
-            I_polar = self.I2 + self.I3
-            m[3, 3] = total_density * I_polar * L / 24.0
-            m[4, 4] = total_density * self.I2 * L / 24.0
-            m[5, 5] = total_density * self.I3 * L / 24.0
-            m[9, 9] = m[3, 3]
-            m[10, 10] = m[4, 4]
-            m[11, 11] = m[5, 5]
+            # Rotational lumped inertias (optional, False by default matching SAP2000/ETABS)
+            if include_rotational_inertia:
+                I_polar = self.I2 + self.I3
+                m[3, 3] = total_density * I_polar * L / 24.0
+                m[4, 4] = total_density * self.I2 * L / 24.0
+                m[5, 5] = total_density * self.I3 * L / 24.0
+                m[9, 9] = m[3, 3]
+                m[10, 10] = m[4, 4]
+                m[11, 11] = m[5, 5]
             return m
 
         # Consistent mass matrix (Archer / Przemieniecki Eq. 11.23)

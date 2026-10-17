@@ -240,6 +240,7 @@ def model_from_core(
                 material=mat,
                 section=sec,
                 include_shear_deformation=elem_shear,
+                roll_angle=float(getattr(elem, "roll_angle", 0.0) or 0.0),
             )
 
         structure.add_element(fem_el)
