@@ -121,7 +121,7 @@ print("=" * 70)
 # 3. RSA along Global X Direction (ASCE 7 Design Spectrum)
 # -----------------------------------------------------------------------------
 print("\n--- [Analysis 1] Seismic Response in X Direction (ASCE 7) ---")
-asce_params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", damping_ratio=0.05)
+asce_params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", risk_category="II", damping_ratio=0.05)
 
 rsa_x = frame.response_spectrum_analysis(
     params=asce_params,

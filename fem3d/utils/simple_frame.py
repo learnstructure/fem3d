@@ -15,6 +15,18 @@ from ..loads import DistributedLoad, ElementPointLoad, PointLoad
 from ..structure import Structure
 
 
+
+def _with_material(section: Section, material: ElasticMaterial) -> Section:
+    """``section`` if it already has ``material``, else a copy of it with ``material`` (the caller's section, which
+    other members may share, is not changed)."""
+    if section.material is material:
+        return section
+    import copy
+    copied = copy.copy(section)
+    copied.material = material
+    return copied
+
+
 class SimpleFrame:
     """
     High-level fluent wrapper for constructing, solving, and evaluating 3D finite element structures.
@@ -215,19 +227,18 @@ class SimpleFrame:
             mat = ElasticMaterial(E=E, nu=nu, G=G, rho=rho, unit_weight=unit_weight)
 
         if section is not None:
-            sec = section
+            sec = _with_material(section, mat)
         elif isinstance(A, Section):
-            sec = A
+            sec = _with_material(A, mat)
         else:
             if A is None:
                 raise ValueError("Must provide either 'A' or 'section'.")
-            sec = Section(A=float(A), I2=i2_val, I3=i3_val, J=J_val, As2=As2, As3=As3)
+            sec = Section(A=float(A), I2=i2_val, I3=i3_val, J=J_val, As2=As2, As3=As3, material=mat)
 
         elem = FrameElement(
             eid=id,
             node_i=node_i,
             node_j=node_j,
-            material=mat,
             section=sec,
             roll_angle=roll_angle,
             web_vector=np.asarray(web_vector, dtype=float) if web_vector is not None else None,
@@ -286,15 +297,14 @@ class SimpleFrame:
             mat = ElasticMaterial(E=E, nu=nu, rho=rho, unit_weight=unit_weight)
 
         if isinstance(A, Section):
-            sec = A
+            sec = _with_material(A, mat)
         else:
-            sec = Section(A=float(A))
+            sec = Section(A=float(A), material=mat)
 
         elem = TrussElement(
             eid=id,
             node_i=node_i,
             node_j=node_j,
-            material=mat,
             section=sec,
             mass=mass,
         )

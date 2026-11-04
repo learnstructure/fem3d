@@ -39,10 +39,10 @@ def build_frame_model(include_shear_deformation: bool = True) -> Structure:
     material = ElasticMaterial(E=30.0e6, nu=0.20, unit_weight=24.0)
 
     # Column: 0.3 m (along X) x 0.4 m (along Y)
-    col_section = Section.from_rectangle(width=0.30, depth=0.40)
+    col_section = Section.from_rectangle(width=0.30, depth=0.40, material=material)
 
     # Beam: 0.25 m width x 0.40 m depth
-    beam_section = Section.from_rectangle(width=0.25, depth=0.40)
+    beam_section = Section.from_rectangle(width=0.25, depth=0.40, material=material)
 
     struct = Structure(units="kN, m")
     x_coords = [0.0, 4.0, 10.0]
@@ -72,7 +72,6 @@ def build_frame_model(include_shear_deformation: bool = True) -> Structure:
                     eid=elem_id,
                     node_i=node_grid[(x, y, z_bot)],
                     node_j=node_grid[(x, y, z_top)],
-                    material=material,
                     section=col_section,
                     include_shear_deformation=include_shear_deformation,
                 )
@@ -90,7 +89,6 @@ def build_frame_model(include_shear_deformation: bool = True) -> Structure:
                     eid=elem_id,
                     node_i=node_grid[(x_coords[bay], y, z)],
                     node_j=node_grid[(x_coords[bay + 1], y, z)],
-                    material=material,
                     section=beam_section,
                     include_shear_deformation=include_shear_deformation,
                 )
@@ -106,7 +104,6 @@ def build_frame_model(include_shear_deformation: bool = True) -> Structure:
                 eid=elem_id,
                 node_i=node_grid[(x, y_coords[0], z)],
                 node_j=node_grid[(x, y_coords[1], z)],
-                material=material,
                 section=beam_section,
                 include_shear_deformation=include_shear_deformation,
             )

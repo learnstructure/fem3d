@@ -94,6 +94,7 @@ def main():
         sd1=0.40,
         tl=8.0,
         site_class="D",
+        risk_category="II",
         damping_ratio=0.05,
     )
     spectrum_data = calculate_design_response_spectrum(params)

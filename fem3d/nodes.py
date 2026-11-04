@@ -68,6 +68,46 @@ class Node:
         self.mass = [0.0, 0.0, 0.0]
         self.inertia = [0.0, 0.0, 0.0]
 
+        # Support spring stiffnesses [kx, ky, kz, krx, kry, krz]
+        self.springs = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    def set_springs(
+        self,
+        kx: Union[float, Iterable] = 0.0,
+        ky: float = 0.0,
+        kz: float = 0.0,
+        krx: float = 0.0,
+        kry: float = 0.0,
+        krz: float = 0.0,
+    ):
+        """
+        Set translational and rotational spring stiffnesses for the 6 degrees of freedom.
+
+        Parameters
+        ----------
+        kx : float or 6-element sequence, optional
+            Stiffness along global x-axis (force/length), or [kx, ky, kz, krx, kry, krz].
+        ky : float, optional
+            Stiffness along global y-axis (force/length).
+        kz : float, optional
+            Stiffness along global z-axis (force/length).
+        krx : float, optional
+            Rotational stiffness about global x-axis (moment/radian).
+        kry : float, optional
+            Rotational stiffness about global y-axis (moment/radian).
+        krz : float, optional
+            Rotational stiffness about global z-axis (moment/radian).
+        """
+        if isinstance(kx, (list, tuple)):
+            vals = list(kx)
+            if len(vals) == 3:
+                vals = [vals[0], vals[1], vals[2], 0.0, 0.0, 0.0]
+            elif len(vals) < 6:
+                vals = vals + [0.0] * (6 - len(vals))
+            self.springs = [float(v) for v in vals[:6]]
+        else:
+            self.springs = [float(kx), float(ky), float(kz), float(krx), float(kry), float(krz)]
+
     def set_support(
         self,
         ux_fixed: Union[bool, int, Iterable] = False,

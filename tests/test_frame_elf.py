@@ -93,6 +93,8 @@ def test_mass_source_and_elf_calculation():
     params = SeismicParameters(
         sds=1.00,
         sd1=0.40,
+        site_class="D",
+        risk_category="II",
         r_factor=8.0,
         importance_factor=1.0,
         system_type="rc_smf",
@@ -136,7 +138,7 @@ def test_frame_elf_equilibrium():
     )
     res = calculate_mass_source(core_model, mass_source=ms)
 
-    params = SeismicParameters(sds=1.00, sd1=0.40, r_factor=8.0, importance_factor=1.0)
+    params = SeismicParameters(sds=1.00, sd1=0.40, site_class="D", risk_category="II", r_factor=8.0, importance_factor=1.0, system_type="rc_smf")
     story_elevations = [3.5, 7.0]
     story_weights = [res.story_weights[h] for h in story_elevations]
 

@@ -77,16 +77,19 @@ class ElementLoad:
         Transform local equivalent nodal loads to global coordinates and
         accumulate in element.eq_load.
         """
-        T = self.element.transformation_matrix()
-        eq_global = T.T @ eq_local
+        if hasattr(self.element, "add_equivalent_load"):
+            self.element.add_equivalent_load(eq_local)
+        else:
+            T = self.element.transformation_matrix()
+            eq_global = T.T @ eq_local
 
-        if not hasattr(self.element, "eq_load") or self.element.eq_load is None:
-            self.element.eq_load = np.zeros(12, dtype=float)
-        if not hasattr(self.element, "eq_load_local") or self.element.eq_load_local is None:
-            self.element.eq_load_local = np.zeros(12, dtype=float)
+            if not hasattr(self.element, "eq_load") or self.element.eq_load is None:
+                self.element.eq_load = np.zeros(12, dtype=float)
+            if not hasattr(self.element, "eq_load_local") or self.element.eq_load_local is None:
+                self.element.eq_load_local = np.zeros(12, dtype=float)
 
-        self.element.eq_load_local += eq_local
-        self.element.eq_load += eq_global
+            self.element.eq_load_local += eq_local
+            self.element.eq_load += eq_global
 
 
 class DistributedLoad(ElementLoad):
@@ -126,10 +129,18 @@ class DistributedLoad(ElementLoad):
         w1: Optional[float] = None,
         w2: Optional[float] = None,
         w3: Optional[float] = None,
+        w1_end: Optional[float] = None,
+        w2_end: Optional[float] = None,
+        w3_end: Optional[float] = None,
         coord_system: Optional[str] = None,
         wx: Optional[float] = None,
         wy: Optional[float] = None,
         wz: Optional[float] = None,
+        wx_end: Optional[float] = None,
+        wy_end: Optional[float] = None,
+        wz_end: Optional[float] = None,
+        start: float = 0.0,
+        end: float = 1.0,
         is_self_weight: bool = False,
     ):
         """
@@ -158,81 +169,92 @@ class DistributedLoad(ElementLoad):
         """
         super().__init__(element)
         self.is_self_weight = bool(is_self_weight)
+        if start < 0.0 or end > 1.0 or start >= end:
+            raise ValueError(f"DistributedLoad relative span must satisfy 0 <= start < end <= 1, got start={start}, end={end}")
+        self.start = float(start)
+        self.end = float(end)
 
-        has_local = any(v is not None for v in (w1, w2, w3))
-        has_global = any(v is not None for v in (wx, wy, wz))
+        has_local = any(v is not None for v in (w1, w2, w3, w1_end, w2_end, w3_end))
+        has_global = any(v is not None for v in (wx, wy, wz, wx_end, wy_end, wz_end))
 
         # Check for conflicting inputs
         if has_local and has_global:
-            loc_vals = [float(v or 0.0) for v in (w1, w2, w3)]
-            glob_vals = [float(v or 0.0) for v in (wx, wy, wz)]
+            loc_vals = [float(v or 0.0) for v in (w1, w2, w3, w1_end, w2_end, w3_end)]
+            glob_vals = [float(v or 0.0) for v in (wx, wy, wz, wx_end, wy_end, wz_end)]
             if any(abs(v) > 1e-12 for v in loc_vals) and any(abs(v) > 1e-12 for v in glob_vals):
                 raise ValueError(
-                    "Cannot specify both local components (w1, w2, w3) and global components (wx, wy, wz) simultaneously. "
+                    "Cannot specify both local components and global components simultaneously. "
                     "Use w1, w2, w3 for local element axes, or wx, wy, wz for global axes."
                 )
 
         sys_spec = coord_system.lower() if coord_system is not None else None
 
         if sys_spec == "global":
-            # Explicitly global requested
             if has_local and not has_global:
                 raise ValueError(
-                    f"coord_system='global' was specified, but local components (w1={w1}, w2={w2}, w3={w3}) were provided. "
+                    f"coord_system='global' was specified, but local components were provided. "
                     "Use wx, wy, wz for global coordinates."
                 )
             gx = float(wx or 0.0)
             gy = float(wy or 0.0)
             gz = float(wz or 0.0)
-            self._set_from_global(gx, gy, gz)
+            gxe = float(gx if wx_end is None else wx_end)
+            gye = float(gy if wy_end is None else wy_end)
+            gze = float(gz if wz_end is None else wz_end)
+            self._set_from_global(gx, gy, gz, gxe, gye, gze)
         elif sys_spec == "local":
-            # Explicitly local requested
             if has_global and not has_local:
                 raise ValueError(
-                    f"coord_system='local' was specified, but global components (wx={wx}, wy={wy}, wz={wz}) were provided. "
+                    f"coord_system='local' was specified, but global components were provided. "
                     "Use w1, w2, w3 for local element coordinates."
                 )
             l1 = float(w1 or 0.0)
             l2 = float(w2 or 0.0)
             l3 = float(w3 or 0.0)
-            self._set_from_local(l1, l2, l3)
+            l1e = float(l1 if w1_end is None else w1_end)
+            l2e = float(l2 if w2_end is None else w2_end)
+            l3e = float(l3 if w3_end is None else w3_end)
+            self._set_from_local(l1, l2, l3, l1e, l2e, l3e)
         else:
-            # Inferred coordinate system
             if has_global:
                 gx = float(wx or 0.0)
                 gy = float(wy or 0.0)
                 gz = float(wz or 0.0)
-                self._set_from_global(gx, gy, gz)
+                gxe = float(gx if wx_end is None else wx_end)
+                gye = float(gy if wy_end is None else wy_end)
+                gze = float(gz if wz_end is None else wz_end)
+                self._set_from_global(gx, gy, gz, gxe, gye, gze)
             else:
                 l1 = float(w1 or 0.0)
                 l2 = float(w2 or 0.0)
                 l3 = float(w3 or 0.0)
-                self._set_from_local(l1, l2, l3)
+                l1e = float(l1 if w1_end is None else w1_end)
+                l2e = float(l2 if w2_end is None else w2_end)
+                l3e = float(l3 if w3_end is None else w3_end)
+                self._set_from_local(l1, l2, l3, l1e, l2e, l3e)
 
         eq_local = self._compute_equivalent_loads()
         self._transform_and_store_equivalent_loads(eq_local)
 
-    def _set_from_global(self, gx: float, gy: float, gz: float):
+    def _set_from_global(self, gx: float, gy: float, gz: float, gxe: float, gye: float, gze: float):
         self.coord_system = "global"
-        self.wx = float(gx)
-        self.wy = float(gy)
-        self.wz = float(gz)
+        self.wx, self.wy, self.wz = float(gx), float(gy), float(gz)
+        self.wx_end, self.wy_end, self.wz_end = float(gxe), float(gye), float(gze)
         R = self.element.rotation_matrix_3x3()
         w_loc = R @ np.array([self.wx, self.wy, self.wz], dtype=float)
-        self.w1 = float(w_loc[0])
-        self.w2 = float(w_loc[1])
-        self.w3 = float(w_loc[2])
+        w_loc_end = R @ np.array([self.wx_end, self.wy_end, self.wz_end], dtype=float)
+        self.w1, self.w2, self.w3 = float(w_loc[0]), float(w_loc[1]), float(w_loc[2])
+        self.w1_end, self.w2_end, self.w3_end = float(w_loc_end[0]), float(w_loc_end[1]), float(w_loc_end[2])
 
-    def _set_from_local(self, l1: float, l2: float, l3: float):
+    def _set_from_local(self, l1: float, l2: float, l3: float, l1e: float, l2e: float, l3e: float):
         self.coord_system = "local"
-        self.w1 = float(l1)
-        self.w2 = float(l2)
-        self.w3 = float(l3)
+        self.w1, self.w2, self.w3 = float(l1), float(l2), float(l3)
+        self.w1_end, self.w2_end, self.w3_end = float(l1e), float(l2e), float(l3e)
         R = self.element.rotation_matrix_3x3()
         w_glob = R.T @ np.array([self.w1, self.w2, self.w3], dtype=float)
-        self.wx = float(w_glob[0])
-        self.wy = float(w_glob[1])
-        self.wz = float(w_glob[2])
+        w_glob_end = R.T @ np.array([self.w1_end, self.w2_end, self.w3_end], dtype=float)
+        self.wx, self.wy, self.wz = float(w_glob[0]), float(w_glob[1]), float(w_glob[2])
+        self.wx_end, self.wy_end, self.wz_end = float(w_glob_end[0]), float(w_glob_end[1]), float(w_glob_end[2])
 
     @property
     def local_components(self) -> np.ndarray:
@@ -270,37 +292,51 @@ class DistributedLoad(ElementLoad):
 
     def _compute_equivalent_loads(self) -> np.ndarray:
         """
-        Compute work-equivalent nodal forces and moments in local coordinates.
-
-        For uniform load:
-        - Axial w1:
-            f_1i = w1 * L / 2,  f_1j = w1 * L / 2
-        - Transverse w2 (bending in 1-2 about axis 3):
-            f_2i = w2 * L / 2,  f_2j = w2 * L / 2
-            m_3i = w2 * L^2 / 12,  m_3j = -w2 * L^2 / 12
-        - Transverse w3 (bending in 1-3 about axis 2):
-            f_3i = w3 * L / 2,  f_3j = w3 * L / 2
-            m_2i = -w3 * L^2 / 12,  m_2j = w3 * L^2 / 12
+        Compute work-equivalent nodal forces and moments in local coordinates via 3-point Gauss-Legendre quadrature.
+        Supports uniform and linearly varying distributed loads on full or partial spans [start, end].
         """
         L = self.element.length
         eq = np.zeros(12, dtype=float)
+        gp = [-np.sqrt(0.6), 0.0, np.sqrt(0.6)]
+        gw = [5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0]
+        a = self.start * L
+        b = self.end * L
+        half_len = (b - a) / 2.0
+        mid = (a + b) / 2.0
 
-        # Axial (local axis 1)
-        eq[0] = self.w1 * L / 2.0
-        eq[6] = self.w1 * L / 2.0
+        for xi, w in zip(gp, gw):
+            x = mid + half_len * xi
+            mu = x / L
+            alpha = (xi + 1.0) / 2.0
+            cur_w1 = self.w1 + alpha * (self.w1_end - self.w1)
+            cur_w2 = self.w2 + alpha * (self.w2_end - self.w2)
+            cur_w3 = self.w3 + alpha * (self.w3_end - self.w3)
 
-        # Flexure in 1-2 about axis 3 (resisted by I3)
-        eq[1] = self.w2 * L / 2.0
-        eq[5] = self.w2 * (L**2) / 12.0
-        eq[7] = self.w2 * L / 2.0
-        eq[11] = -self.w2 * (L**2) / 12.0
+            n_ax1 = 1.0 - mu
+            n_ax2 = mu
 
-        # Flexure in 1-3 about axis 2 (resisted by I2)
-        # Note sign convention: positive theta_2 is slope -du_3/dx1
-        eq[2] = self.w3 * L / 2.0
-        eq[4] = -self.w3 * (L**2) / 12.0
-        eq[8] = self.w3 * L / 2.0
-        eq[10] = self.w3 * (L**2) / 12.0
+            n_tr1 = 1.0 - 3.0 * mu**2 + 2.0 * mu**3
+            n_tr2 = x * (1.0 - mu)**2
+            n_tr3 = 3.0 * mu**2 - 2.0 * mu**3
+            n_tr4 = x * (mu**2 - mu)
+
+            wt = w * half_len
+
+            # Axial (local axis 1)
+            eq[0] += wt * n_ax1 * cur_w1
+            eq[6] += wt * n_ax2 * cur_w1
+
+            # Transverse w2 (bending in 1-2 about axis 3)
+            eq[1] += wt * n_tr1 * cur_w2
+            eq[5] += wt * n_tr2 * cur_w2
+            eq[7] += wt * n_tr3 * cur_w2
+            eq[11] += wt * n_tr4 * cur_w2
+
+            # Transverse w3 (bending in 1-3 about axis 2)
+            eq[2] += wt * n_tr1 * cur_w3
+            eq[4] += wt * (-n_tr2) * cur_w3
+            eq[8] += wt * n_tr3 * cur_w3
+            eq[10] += wt * (-n_tr4) * cur_w3
 
         return eq
 
@@ -554,6 +590,20 @@ class ElementPointLoad(ElementLoad):
         # Torsion m1
         eq[3] = self.m1 * (b / L)
         eq[9] = self.m1 * (a / L)
+
+        # Concentrated moment m3 (bending in 1-2 about axis 3)
+        if abs(self.m3) > 1e-12:
+            eq[1] -= (6.0 * a * b * self.m3) / (L**3)
+            eq[7] += (6.0 * a * b * self.m3) / (L**3)
+            eq[5] += (b * (2.0 * a - b) * self.m3) / (L**2)
+            eq[11] += (a * (2.0 * b - a) * self.m3) / (L**2)
+
+        # Concentrated moment m2 (bending in 1-3 about axis 2)
+        if abs(self.m2) > 1e-12:
+            eq[2] += (6.0 * a * b * self.m2) / (L**3)
+            eq[8] -= (6.0 * a * b * self.m2) / (L**3)
+            eq[4] += (b * (2.0 * a - b) * self.m2) / (L**2)
+            eq[10] += (a * (2.0 * b - a) * self.m2) / (L**2)
 
         return eq
 

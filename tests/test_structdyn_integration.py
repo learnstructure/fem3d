@@ -204,7 +204,7 @@ def test_response_spectrum_analysis_3d(sample_3d_portal_frame):
     from struct_load import SeismicParameters
 
     frame = sample_3d_portal_frame
-    params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", damping_ratio=0.05)
+    params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", risk_category="II", system_type="steel_smf", damping_ratio=0.05)
     res_x = frame.response_spectrum_analysis(
         params=params,
         n_modes=6,

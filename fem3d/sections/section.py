@@ -3,12 +3,15 @@ Cross-section definitions for 3D finite element analysis.
 """
 
 import math
-from typing import Optional
+from typing import Any, Optional
 
 
 class Section:
     """
-    Represents a cross-section of a 3D structural element.
+    Represents a cross-section of a 3D structural element: its geometric properties and its material.
+
+    Elements take a section and read their material from it (``section.material``), so the same shape in two
+    materials is two sections.
 
     Moments of Inertia & Local Axes Convention
     -------------------------------------------
@@ -38,6 +41,8 @@ class Section:
         Effective shear area in the local 2-direction.
     As3 : float, optional
         Effective shear area in the local 3-direction.
+    material : ElasticMaterial or None
+        Material of the section.
     """
 
     def __init__(
@@ -48,6 +53,7 @@ class Section:
         J: float = 0.0,
         As2: Optional[float] = None,
         As3: Optional[float] = None,
+        material: Optional[Any] = None,
     ):
         """
         Initialize a 3D Section object.
@@ -66,7 +72,10 @@ class Section:
             Effective shear area along local 2-axis. Defaults to None.
         As3 : float, optional
             Effective shear area along local 3-axis. Defaults to None.
+        material : ElasticMaterial, optional
+            Material of the section. Elements built on the section require it.
         """
+        self.material = material
         self.A = float(A)
         self.I2 = float(I2)
         self.I3 = float(I3)
@@ -75,7 +84,7 @@ class Section:
         self.As3 = float(As3 if As3 is not None else 0.0)
 
     @classmethod
-    def from_rectangle(cls, width: float, depth: float) -> "Section":
+    def from_rectangle(cls, width: float, depth: float, material: Optional[Any] = None) -> "Section":
         """
         Create a rectangular cross-section.
 
@@ -108,10 +117,10 @@ class Section:
         As2 = (5.0 / 6.0) * A
         As3 = (5.0 / 6.0) * A
 
-        return cls(A=A, I2=I2, I3=I3, J=J, As2=As2, As3=As3)
+        return cls(A=A, I2=I2, I3=I3, J=J, As2=As2, As3=As3, material=material)
 
     @classmethod
-    def from_circle(cls, diameter: float) -> "Section":
+    def from_circle(cls, diameter: float, material: Optional[Any] = None) -> "Section":
         """
         Create a solid circular cross-section.
 
@@ -127,10 +136,10 @@ class Section:
         J_val = math.pi * (d**4) / 32.0
         # Shear area for solid circle: 9/10 * A
         As_val = 0.9 * A
-        return cls(A=A, I2=I_val, I3=I_val, J=J_val, As2=As_val, As3=As_val)
+        return cls(A=A, I2=I_val, I3=I_val, J=J_val, As2=As_val, As3=As_val, material=material)
 
     @classmethod
-    def from_pipe(cls, outer_d: float, thickness: float) -> "Section":
+    def from_pipe(cls, outer_d: float, thickness: float, material: Optional[Any] = None) -> "Section":
         """
         Create a hollow circular pipe cross-section.
 
@@ -151,11 +160,11 @@ class Section:
         I_val = math.pi * (d_o**4 - d_i**4) / 64.0
         J_val = math.pi * (d_o**4 - d_i**4) / 32.0
         As_val = 0.5 * A
-        return cls(A=A, I2=I_val, I3=I_val, J=J_val, As2=As_val, As3=As_val)
+        return cls(A=A, I2=I_val, I3=I_val, J=J_val, As2=As_val, As3=As_val, material=material)
 
     @classmethod
     def from_tube(
-        cls, width: float, depth: float, thickness: float
+        cls, width: float, depth: float, thickness: float, material: Optional[Any] = None
     ) -> "Section":
         """
         Create a hollow rectangular box / structural tube (HSS) cross-section.
@@ -193,11 +202,11 @@ class Section:
         perimeter_m = 2.0 * ((b - t) + (h - t))
         J = 4.0 * (A_m**2) / (perimeter_m / t)
 
-        return cls(A=A, I2=I2, I3=I3, J=J)
+        return cls(A=A, I2=I2, I3=I3, J=J, material=material)
 
     @classmethod
     def from_i_shape(
-        cls, d: float, bf: float, tf: float, tw: float
+        cls, d: float, bf: float, tf: float, tw: float, material: Optional[Any] = None
     ) -> "Section":
         """
         Create an I-beam / W-shape cross-section.
@@ -235,7 +244,7 @@ class Section:
         As2 = d * tw
         As3 = 2.0 * bf * tf * (5.0 / 6.0)
 
-        return cls(A=A, I2=I2, I3=I3, J=J, As2=As2, As3=As3)
+        return cls(A=A, I2=I2, I3=I3, J=J, As2=As2, As3=As3, material=material)
 
     def __repr__(self) -> str:
         return f"Section(A={self.A}, I2={self.I2}, I3={self.I3}, J={self.J})"

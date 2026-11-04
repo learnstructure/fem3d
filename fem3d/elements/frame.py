@@ -65,8 +65,8 @@ class FrameElement(ElementBase):
         eid: Union[int, str],
         node_i,
         node_j,
-        material: Union[ElasticMaterial, float],
-        section: Union[Section, float],
+        section: Optional[Union[Section, float]] = None,
+        material: Optional[Union[ElasticMaterial, float]] = None,
         roll_angle: float = 0.0,
         web_vector: Optional[np.ndarray] = None,
         mass: float = 0.0,
@@ -85,10 +85,10 @@ class FrameElement(ElementBase):
             Start node.
         node_j : Node
             End node.
-        material : ElasticMaterial or float
-            Material definition or numeric Young's modulus E.
-        section : Section or float
+        section : Section or float, optional
             Section definition or numeric cross-sectional area A.
+        material : ElasticMaterial or float, optional
+            Material definition or numeric Young's modulus E. If omitted and section has material, taken from section.
         roll_angle : float, optional
             Member roll angle in degrees about local 1-axis (v1).
             Rotates the local (2, 3) axes. Defaults to 0.0.
@@ -109,6 +109,14 @@ class FrameElement(ElementBase):
             eid, node_i, node_j, roll_angle=roll_angle, web_vector=web_vector
         )
 
+        if isinstance(section, ElasticMaterial) and (isinstance(material, (Section, int, float)) or material is None):
+            material, section = section, material
+        if material is None and hasattr(section, "material") and getattr(section, "material", None) is not None:
+            material = section.material
+        if section is None and isinstance(material, Section):
+            section = material
+            material = getattr(section, "material", None)
+
         # Parse material
         if isinstance(material, (int, float)):
             self.material = ElasticMaterial(E=float(material))
@@ -128,14 +136,38 @@ class FrameElement(ElementBase):
         self.mass = float(mass)
         self.include_shear_deformation = include_shear_deformation
 
-        self.releases_i = releases_i
-        self.releases_j = releases_j
+        self._releases_i = [bool(x) for x in releases_i] if releases_i is not None and any(releases_i) else None
+        self._releases_j = [bool(x) for x in releases_j] if releases_j is not None and any(releases_j) else None
 
         # Local equivalent nodal loads (12-element vector)
+        self._raw_eq_load_local = np.zeros(12, dtype=float)
         self.eq_load_local = np.zeros(12, dtype=float)
         self.eq_load = np.zeros(12, dtype=float)  # in global coordinates
 
-    def local_stiffness(self) -> np.ndarray:
+        if self._releases_i is not None or self._releases_j is not None:
+            self._condense_loads()
+
+    @property
+    def releases_i(self) -> Optional[List[bool]]:
+        return self._releases_i
+
+    @releases_i.setter
+    def releases_i(self, val: Optional[List[bool]]) -> None:
+        self._releases_i = [bool(x) for x in val] if val is not None and any(val) else None
+        if hasattr(self, "_raw_eq_load_local"):
+            self._condense_loads()
+
+    @property
+    def releases_j(self) -> Optional[List[bool]]:
+        return self._releases_j
+
+    @releases_j.setter
+    def releases_j(self, val: Optional[List[bool]]) -> None:
+        self._releases_j = [bool(x) for x in val] if val is not None and any(val) else None
+        if hasattr(self, "_raw_eq_load_local"):
+            self._condense_loads()
+
+    def _unreleased_local_stiffness(self) -> np.ndarray:
         """
         Return the 12x12 element stiffness matrix in local coordinates.
 
@@ -254,6 +286,19 @@ class FrameElement(ElementBase):
             k[10, 11] = 0.0
             k[10, 10] = k4_2
 
+        return k
+
+    def local_stiffness(self) -> np.ndarray:
+        """
+        Return the 12x12 element stiffness matrix in local coordinates.
+
+        Returns
+        -------
+        numpy.ndarray
+            12x12 local stiffness matrix.
+        """
+        k = self._unreleased_local_stiffness()
+
         # Handle optional end releases if specified
         if self.releases_i is not None or self.releases_j is not None:
             k = self._apply_releases(k)
@@ -263,8 +308,8 @@ class FrameElement(ElementBase):
     def _apply_releases(self, k: np.ndarray) -> np.ndarray:
         """
         Condense out released degrees of freedom via static condensation.
-        releases_i: 6 booleans [ux, uy, uz, rx, ry, rz]
-        releases_j: 6 booleans [ux, uy, uz, rx, ry, rz]
+        releases_i: 6 booleans [u1, u2, u3, r1, r2, r3] (member local coordinates)
+        releases_j: 6 booleans [u1, u2, u3, r1, r2, r3] (member local coordinates)
         """
         rel_flags = [False] * 12
         if self.releases_i:
@@ -291,14 +336,83 @@ class FrameElement(ElementBase):
         K_cr = k[np.ix_(released_dofs, retained_dofs)]
         K_cc = k[np.ix_(released_dofs, released_dofs)]
 
-        K_cc_inv = np.linalg.pinv(K_cc)
-        K_r_star = K_rr - K_rc @ K_cc_inv @ K_cr
+        if np.linalg.cond(K_cc) > 1e12:
+            raise ValueError(f"Element {self.id}: end releases {self.releases_i}/{self.releases_j} make the member a mechanism")
+        try:
+            K_cr_cond = np.linalg.solve(K_cc, K_cr)
+        except np.linalg.LinAlgError:
+            raise ValueError(f"Element {self.id}: end releases {self.releases_i}/{self.releases_j} make the member a mechanism")
+
+        K_r_star = K_rr - K_rc @ K_cr_cond
 
         k_new = np.zeros((12, 12), dtype=float)
         for i_idx, r_i in enumerate(retained_dofs):
             for j_idx, r_j in enumerate(retained_dofs):
                 k_new[r_i, r_j] = K_r_star[i_idx, j_idx]
         return k_new
+
+    def _condense_loads(self, k_unreleased: Optional[np.ndarray] = None) -> None:
+        """
+        Condense equivalent nodal loads for released degrees of freedom:
+            f0_r* = f0_r - K_rc @ inv(K_cc) @ f0_c
+            f0_c* = 0
+        """
+        if not hasattr(self, "_raw_eq_load_local") or self._raw_eq_load_local is None:
+            self._raw_eq_load_local = np.zeros(12, dtype=float)
+
+        rel_flags = [False] * 12
+        if self.releases_i:
+            for i, r in enumerate(self.releases_i):
+                if r:
+                    rel_flags[i] = True
+        if self.releases_j:
+            for i, r in enumerate(self.releases_j):
+                if r:
+                    rel_flags[6 + i] = True
+
+        released_dofs = [idx for idx, flag in enumerate(rel_flags) if flag]
+        retained_dofs = [idx for idx, flag in enumerate(rel_flags) if not flag]
+
+        if not released_dofs:
+            self.eq_load_local = self._raw_eq_load_local.copy()
+            T = self.transformation_matrix()
+            self.eq_load = T.T @ self.eq_load_local
+            return
+
+        if k_unreleased is None:
+            k_unreleased = self._unreleased_local_stiffness()
+
+        K_rc = k_unreleased[np.ix_(retained_dofs, released_dofs)]
+        K_cc = k_unreleased[np.ix_(released_dofs, released_dofs)]
+
+        if np.linalg.cond(K_cc) > 1e12:
+            raise ValueError(f"Element {self.id}: end releases {self.releases_i}/{self.releases_j} make the member a mechanism")
+
+        f0 = self._raw_eq_load_local
+        f0_r = f0[retained_dofs]
+        f0_c = f0[released_dofs]
+
+        try:
+            f0_c_cond = np.linalg.solve(K_cc, f0_c)
+        except np.linalg.LinAlgError:
+            raise ValueError(f"Element {self.id}: end releases {self.releases_i}/{self.releases_j} make the member a mechanism")
+
+        f0_r_star = f0_r - K_rc @ f0_c_cond
+
+        condensed_eq = np.zeros(12, dtype=float)
+        condensed_eq[retained_dofs] = f0_r_star
+        condensed_eq[released_dofs] = 0.0
+
+        self.eq_load_local = condensed_eq
+        T = self.transformation_matrix()
+        self.eq_load = T.T @ self.eq_load_local
+
+    def add_equivalent_load(self, eq_local: np.ndarray) -> None:
+        """Accumulate equivalent local load and condense if releases are present."""
+        if not hasattr(self, "_raw_eq_load_local") or self._raw_eq_load_local is None:
+            self._raw_eq_load_local = np.zeros(12, dtype=float)
+        self._raw_eq_load_local += eq_local
+        self._condense_loads()
 
     def local_mass_matrix(self, lumped: bool = False, include_rotational_inertia: bool = False) -> np.ndarray:
         """
@@ -510,6 +624,14 @@ class FrameElement(ElementBase):
         u_local = self.get_local_displacements(self.structure.disp)
         k_local = self.local_stiffness()
         f_local = k_local @ u_local - self.eq_load_local
+        if self.releases_i:
+            for i_dof, rel in enumerate(self.releases_i):
+                if rel:
+                    f_local[i_dof] = 0.0
+        if self.releases_j:
+            for j_dof, rel in enumerate(self.releases_j):
+                if rel:
+                    f_local[6 + j_dof] = 0.0
         self.f_local = f_local
         return f_local
 

@@ -355,17 +355,20 @@ print(steel.G)  # 11153.8 ksi
 
 ### `Section`
 
+A section owns its material: elements take only a section and read E, G, ν and density from `section.material`. The same shape in two materials is two sections.
+
 ```python
-from fem3d import Section
+from fem3d import ElasticMaterial, Section
 
-sec = Section(A=10.0, I2=50.0, I3=200.0, J=30.0)
+steel = ElasticMaterial(E=29000.0, nu=0.3)
+sec = Section(A=10.0, I2=50.0, I3=200.0, J=30.0, material=steel)
 
-# Factory methods:
-sec = Section.from_rectangle(width=4.0, depth=8.0)
-sec = Section.from_circle(diameter=6.0)
-sec = Section.from_pipe(outer_d=8.0, thickness=0.5)
-sec = Section.from_tube(width=6.0, depth=8.0, thickness=0.375)
-sec = Section.from_i_shape(bf=6.0, tf=0.5, d=10.0, tw=0.3)
+# Factory methods (each takes material=...):
+sec = Section.from_rectangle(width=4.0, depth=8.0, material=steel)
+sec = Section.from_circle(diameter=6.0, material=steel)
+sec = Section.from_pipe(outer_d=8.0, thickness=0.5, material=steel)
+sec = Section.from_tube(width=6.0, depth=8.0, thickness=0.375, material=steel)
+sec = Section.from_i_shape(bf=6.0, tf=0.5, d=10.0, tw=0.3, material=steel)
 ```
 
 ### `Structure`
@@ -387,8 +390,8 @@ n1.set_support([1, 1, 1, 1, 1, 1])   # fixed base
 
 # Add element: E, nu, unit_weight (G is automatically derived)
 mat = ElasticMaterial(E=30.0e6, nu=0.20, unit_weight=24.0)
-sec = Section.from_rectangle(width=0.30, depth=0.40)
-el = FrameElement(1, n1, n2, mat, sec, include_shear_deformation=True)
+sec = Section.from_rectangle(width=0.30, depth=0.40, material=mat)
+el = FrameElement(1, n1, n2, sec, include_shear_deformation=True)
 s.add_element(el)
 
 # Add load
@@ -455,7 +458,7 @@ results.create_report()
 
 ## Section Library
 
-`Section` provides factory class methods for common cross-sections. All formulas are standard elastic section properties.
+`Section` provides factory class methods for common cross-sections, each taking the section's `material`. All formulas are standard elastic section properties.
 
 | Factory method | Shape | Parameters |
 |---------------|-------|------------|
@@ -631,8 +634,11 @@ import struct_core as sc
 # 1. fem3d -> struct_core
 # Automatically preserves active units (e.g. 'kN, m'). Existing loads are
 # mapped to 'LIVE' by default, reserving 'DEAD' for automated self-weight.
+# Node masses and material mass densities are converted from fem3d's consistent
+# units back to the model's mass unit (e.g. t/m^3 -> kg/m^3 for kN, m).
 sc_model = model_to_core(frame)          # SimpleFrame or Structure
-sc_result = result_to_core(results)      # Results object or structure
+sc_result = result_to_core(results)      # Results object or structure; member P, V2, V3, T, M2, M3 at the
+                                         # 11 STANDARD_STATIONS (0, 0.1, ..., 1), including member-load effects
 
 # 2. Add self-weight via struct_load engine
 sc_model = apply_self_weight(sc_model)

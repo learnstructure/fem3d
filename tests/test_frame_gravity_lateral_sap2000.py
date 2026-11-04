@@ -41,11 +41,11 @@ def build_frame_gravity_lateral(include_shear_deformation: bool = True) -> Struc
 
     # Column: 0.3 m (along X) x 0.4 m (along Y)
     # Depth (local 2, along +Y) = 0.40 m, Width (local 3, along -X) = 0.30 m
-    col_section = Section.from_rectangle(width=0.30, depth=0.40)
+    col_section = Section.from_rectangle(width=0.30, depth=0.40, material=material)
 
     # Beam: 0.25 m width x 0.40 m depth
     # Depth (local 2, along +Z) = 0.40 m, Width (local 3, horizontal) = 0.25 m
-    beam_section = Section.from_rectangle(width=0.25, depth=0.40)
+    beam_section = Section.from_rectangle(width=0.25, depth=0.40, material=material)
 
     struct = Structure()
     x_coords = [0.0, 4.0, 10.0]
@@ -81,7 +81,6 @@ def build_frame_gravity_lateral(include_shear_deformation: bool = True) -> Struc
                     eid=elem_id,
                     node_i=n_bot,
                     node_j=n_top,
-                    material=material,
                     section=col_section,
                     include_shear_deformation=include_shear_deformation,
                 )
@@ -101,7 +100,6 @@ def build_frame_gravity_lateral(include_shear_deformation: bool = True) -> Struc
                     eid=elem_id,
                     node_i=n1,
                     node_j=n2,
-                    material=material,
                     section=beam_section,
                     include_shear_deformation=include_shear_deformation,
                 )
@@ -119,7 +117,6 @@ def build_frame_gravity_lateral(include_shear_deformation: bool = True) -> Struc
                 eid=elem_id,
                 node_i=n1,
                 node_j=n2,
-                material=material,
                 section=beam_section,
                 include_shear_deformation=include_shear_deformation,
             )

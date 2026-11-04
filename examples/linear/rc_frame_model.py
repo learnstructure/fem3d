@@ -43,7 +43,7 @@ from fem3d import (
 try:
     from struct_core import (
         BeamElement as ScBeamElement,
-        ElasticMaterial as ScElasticMaterial,
+        ConcreteMaterial as ScConcreteMaterial,
         Node as ScNode,
         RectangularSection as ScRectangularSection,
         StructuralModel,
@@ -68,6 +68,7 @@ BEAM_WIDTH = 0.25  # horizontal width
 BEAM_DEPTH = 0.40  # vertical depth
 
 # Material Properties (C30 Concrete)
+CONCRETE_FC = 30.0e3      # kPa (C30: f'c = 30 MPa)
 CONCRETE_E = 30.0e6       # kPa (30 GPa)
 CONCRETE_NU = 0.20
 CONCRETE_UNIT_WEIGHT = 24.0  # kN/m^3
@@ -104,8 +105,8 @@ def create_rc_frame(
         - `beam_section`: Section
     """
     material = ElasticMaterial(E=CONCRETE_E, nu=CONCRETE_NU, unit_weight=CONCRETE_UNIT_WEIGHT)
-    col_section = Section.from_rectangle(width=COL_WIDTH, depth=COL_DEPTH)
-    beam_section = Section.from_rectangle(width=BEAM_WIDTH, depth=BEAM_DEPTH)
+    col_section = Section.from_rectangle(width=COL_WIDTH, depth=COL_DEPTH, material=material)
+    beam_section = Section.from_rectangle(width=BEAM_WIDTH, depth=BEAM_DEPTH, material=material)
 
     struct = Structure(units=units)
 
@@ -134,7 +135,6 @@ def create_rc_frame(
                     eid=elem_id,
                     node_i=node_grid[(x, y, z_bot)],
                     node_j=node_grid[(x, y, z_top)],
-                    material=material,
                     section=col_section,
                     include_shear_deformation=include_shear_deformation,
                 )
@@ -153,7 +153,6 @@ def create_rc_frame(
                     eid=elem_id,
                     node_i=node_grid[(X_COORDS[bay], y, z)],
                     node_j=node_grid[(X_COORDS[bay + 1], y, z)],
-                    material=material,
                     section=beam_section,
                     include_shear_deformation=include_shear_deformation,
                 )
@@ -169,7 +168,6 @@ def create_rc_frame(
                 eid=elem_id,
                 node_i=node_grid[(x, Y_COORDS[0], z)],
                 node_j=node_grid[(x, Y_COORDS[1], z)],
-                material=material,
                 section=beam_section,
                 include_shear_deformation=include_shear_deformation,
             )
@@ -217,9 +215,10 @@ def create_rc_frame_core(
 
     model = StructuralModel(units=units, story_elevations=list(STORY_ELEVATIONS))
 
-    # Material
-    mat = ScElasticMaterial(
+    # Material: C30 concrete (f'c = 30 MPa)
+    mat = ScConcreteMaterial(
         id="C30_Concrete",
+        fc=CONCRETE_FC,
         E=CONCRETE_E,
         nu=CONCRETE_NU,
         rho=CONCRETE_RHO,
@@ -228,8 +227,8 @@ def create_rc_frame_core(
     model.materials.append(mat)
 
     # Sections
-    sec_col = ScRectangularSection(id="Col_300x400", b=COL_WIDTH, h=COL_DEPTH)
-    sec_bm = ScRectangularSection(id="Beam_250x400", b=BEAM_WIDTH, h=BEAM_DEPTH)
+    sec_col = ScRectangularSection(id="Col_300x400", material_id=mat.id, b=COL_WIDTH, h=COL_DEPTH)
+    sec_bm = ScRectangularSection(id="Beam_250x400", material_id=mat.id, b=BEAM_WIDTH, h=BEAM_DEPTH)
     model.sections.extend([sec_col, sec_bm])
 
     # Nodes (18) and Supports (6 at ground)
@@ -256,7 +255,6 @@ def create_rc_frame_core(
                         id=elem_id,
                         start_node=node_grid[(x, y, z_bot)],
                         end_node=node_grid[(x, y, z_top)],
-                        material_id=mat.id,
                         section_id=sec_col.id,
                         include_shear_deformation=include_shear_deformation,
                     )
@@ -274,7 +272,6 @@ def create_rc_frame_core(
                         id=elem_id,
                         start_node=node_grid[(X_COORDS[bay], y, z)],
                         end_node=node_grid[(X_COORDS[bay + 1], y, z)],
-                        material_id=mat.id,
                         section_id=sec_bm.id,
                         include_shear_deformation=include_shear_deformation,
                     )
@@ -290,7 +287,6 @@ def create_rc_frame_core(
                     id=elem_id,
                     start_node=node_grid[(x, Y_COORDS[0], z)],
                     end_node=node_grid[(x, Y_COORDS[1], z)],
-                    material_id=mat.id,
                     section_id=sec_bm.id,
                     include_shear_deformation=include_shear_deformation,
                 )

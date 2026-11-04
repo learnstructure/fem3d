@@ -46,20 +46,20 @@ def create_3d_frame_model():
     ]
 
     mat_steel = ElasticMaterial(id="STEEL", E=200e6, rho=7850.0)  # 200 GPa, 7850 kg/m^3
-    sec_col = GeneralSection(id="COL", A=0.015, I2=1.5e-4, I3=1.5e-4, J=3e-4)
-    sec_beam = GeneralSection(id="BEAM", A=0.012, I2=2.0e-4, I3=1.0e-4, J=2e-4)
+    sec_col = GeneralSection(id="COL", material_id="STEEL", A=0.015, I2=1.5e-4, I3=1.5e-4, J=3e-4)
+    sec_beam = GeneralSection(id="BEAM", material_id="STEEL", A=0.012, I2=2.0e-4, I3=1.0e-4, J=2e-4)
 
     elements = [
         # 4 Columns
-        BeamElement(id="C1", start_node=1, end_node=5, material_id="STEEL", section_id="COL"),
-        BeamElement(id="C2", start_node=2, end_node=6, material_id="STEEL", section_id="COL"),
-        BeamElement(id="C3", start_node=3, end_node=7, material_id="STEEL", section_id="COL"),
-        BeamElement(id="C4", start_node=4, end_node=8, material_id="STEEL", section_id="COL"),
+        BeamElement(id="C1", start_node=1, end_node=5, section_id="COL"),
+        BeamElement(id="C2", start_node=2, end_node=6, section_id="COL"),
+        BeamElement(id="C3", start_node=3, end_node=7, section_id="COL"),
+        BeamElement(id="C4", start_node=4, end_node=8, section_id="COL"),
         # 4 Roof perimeter beams
-        BeamElement(id="B1", start_node=5, end_node=6, material_id="STEEL", section_id="BEAM"),
-        BeamElement(id="B2", start_node=6, end_node=7, material_id="STEEL", section_id="BEAM"),
-        BeamElement(id="B3", start_node=7, end_node=8, material_id="STEEL", section_id="BEAM"),
-        BeamElement(id="B4", start_node=8, end_node=5, material_id="STEEL", section_id="BEAM"),
+        BeamElement(id="B1", start_node=5, end_node=6, section_id="BEAM"),
+        BeamElement(id="B2", start_node=6, end_node=7, section_id="BEAM"),
+        BeamElement(id="B3", start_node=7, end_node=8, section_id="BEAM"),
+        BeamElement(id="B4", start_node=8, end_node=5, section_id="BEAM"),
     ]
 
     supports = [

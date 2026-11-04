@@ -31,8 +31,7 @@ class TrussElement(ElementBase):
         eid: Union[int, str],
         node_i,
         node_j,
-        material: Union[ElasticMaterial, float],
-        section: Union[Section, float],
+        section: Section,
         mass: float = 0.0,
     ):
         """
@@ -46,35 +45,25 @@ class TrussElement(ElementBase):
             Start node.
         node_j : Node
             End node.
-        material : ElasticMaterial or float
-            Material definition or numeric Young's modulus E.
-        section : Section or float
-            Section definition or numeric cross-sectional area A.
+        section : Section
+            Section definition (area A and its ``material``).
         mass : float, optional
             Additional distributed non-structural mass per unit length. Defaults to 0.0.
         """
         super().__init__(eid, node_i, node_j)
 
-        if isinstance(material, (int, float)):
-            self.material = ElasticMaterial(E=float(material))
-        else:
-            self.material = material
-
-        if isinstance(section, (int, float)):
-            self.section = Section(A=float(section))
-        else:
-            self.section = section
-
+        if getattr(section, "material", None) is None:
+            raise ValueError(f"Truss element {eid!r}: its section has no material (Section(..., material=...))")
+        self.section = section
         self.area = self.section.A
         self.mass = float(mass)
         self.eq_load = np.zeros(12, dtype=float)
-
     def local_stiffness(self) -> np.ndarray:
         """
         Return the 12x12 local stiffness matrix.
         Only the axial terms at dofs 0 and 6 are non-zero.
         """
-        E = self.material.E
+        E = self.section.material.E
         A = self.area
         L = self.length
         k = np.zeros((12, 12), dtype=float)
@@ -92,7 +81,7 @@ class TrussElement(ElementBase):
             K_trans = (EA/L) * [ v1*v1^T  -v1*v1^T ]
                                [ -v1*v1^T  v1*v1^T ]
         """
-        E = self.material.E
+        E = self.section.material.E
         A = self.area
         L = self.length
         EA_L = E * A / L
@@ -113,7 +102,7 @@ class TrussElement(ElementBase):
     def local_mass_matrix(self, lumped: bool = False, include_rotational_inertia: bool = False) -> np.ndarray:
         """Return 12x12 mass matrix in local coordinates."""
         L = self.length
-        total_density = self.material.rho * self.area + self.mass
+        total_density = self.section.material.rho * self.area + self.mass
         m_total = total_density * L
         m = np.zeros((12, 12), dtype=float)
 
@@ -165,7 +154,7 @@ class TrussElement(ElementBase):
 
         # Elongation along member vector
         delta_L = float(np.dot(self.v1, u_j - u_i))
-        axial_tension = (self.material.E * self.area / self.length) * delta_L
+        axial_tension = (self.section.material.E * self.area / self.length) * delta_L
 
         # Local forces: compression positive in f1_i, or standard tension convention
         # We follow standard convention: [f1_i, 0, 0, 0, 0, 0, f1_j, 0, ...]

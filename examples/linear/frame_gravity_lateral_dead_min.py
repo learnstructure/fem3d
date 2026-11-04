@@ -10,8 +10,8 @@ from struct_load import apply_self_weight
 
 # 1. Material & Sections
 mat = ElasticMaterial(E=30.0e6, nu=0.20, unit_weight=24.0)  # C30 Concrete
-col_sec = Section.from_rectangle(width=0.30, depth=0.40)      # Column: 0.3m x 0.4m
-beam_sec = Section.from_rectangle(width=0.25, depth=0.40)     # Beam: 0.25m x 0.40m
+col_sec = Section.from_rectangle(width=0.30, depth=0.40, material=mat)      # Column: 0.3m x 0.4m
+beam_sec = Section.from_rectangle(width=0.25, depth=0.40, material=mat)     # Beam: 0.25m x 0.40m
 
 # 2. Structure & Grid Setup
 struct = Structure(units="kN, m")
@@ -40,7 +40,6 @@ for story in range(2):
                 eid=eid,
                 node_i=node_grid[(x, y, z_coords[story])],
                 node_j=node_grid[(x, y, z_coords[story + 1])],
-                material=mat,
                 section=col_sec,
                 include_shear_deformation=True,
             )
@@ -58,7 +57,6 @@ for story in (1, 2):
                 eid=eid,
                 node_i=node_grid[(x_coords[bay], y, z)],
                 node_j=node_grid[(x_coords[bay + 1], y, z)],
-                material=mat,
                 section=beam_sec,
                 include_shear_deformation=True,
             )
@@ -71,7 +69,6 @@ for story in (1, 2):
             eid=eid,
             node_i=node_grid[(x, y_coords[0], z)],
             node_j=node_grid[(x, y_coords[1], z)],
-            material=mat,
             section=beam_sec,
             include_shear_deformation=True,
         )

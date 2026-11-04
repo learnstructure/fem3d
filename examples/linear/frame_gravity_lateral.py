@@ -73,12 +73,12 @@ material = ElasticMaterial(E=E, G=G, rho=0.0)
 # Column: 0.3 m (along X) x 0.4 m (along Y)
 # Vertical member local triad: local 2 is along global +Y, local 3 is along global -X.
 # Therefore depth (local 2) = 0.4 m, width (local 3) = 0.3 m.
-col_section = Section.from_rectangle(width=0.30, depth=0.40)
+col_section = Section.from_rectangle(width=0.30, depth=0.40, material=material)
 
 # Beam: 0.25 m width (horizontal) x 0.40 m depth (vertical)
 # Horizontal member local triad: local 2 is vertical (+Z), local 3 is horizontal.
 # Therefore depth (local 2) = 0.4 m, width (local 3) = 0.25 m.
-beam_section = Section.from_rectangle(width=0.25, depth=0.40)
+beam_section = Section.from_rectangle(width=0.25, depth=0.40, material=material)
 
 # -------------------------------------------------------------------
 # 3. Initialize Structure and Grid Geometry
@@ -124,7 +124,6 @@ for story in range(2):
                 eid=elem_id,
                 node_i=n_bot,
                 node_j=n_top,
-                material=material,
                 section=col_section,
                 include_shear_deformation=INCLUDE_SHEAR_DEFORMATION,
             )
@@ -151,7 +150,6 @@ for story in range(1, 3):
                 eid=elem_id,
                 node_i=n1,
                 node_j=n2,
-                material=material,
                 section=beam_section,
                 include_shear_deformation=INCLUDE_SHEAR_DEFORMATION,
             )
@@ -169,7 +167,6 @@ for story in range(1, 3):
             eid=elem_id,
             node_i=n1,
             node_j=n2,
-            material=material,
             section=beam_section,
             include_shear_deformation=INCLUDE_SHEAR_DEFORMATION,
         )

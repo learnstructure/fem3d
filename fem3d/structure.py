@@ -77,14 +77,6 @@ class Structure:
         """Add a load (PointLoad, DistributedLoad, etc.) to the structure."""
         self.loads.append(load)
 
-    def apply_self_weight(self, direction: str = "-z", gravity_accel: Optional[float] = None, units: Optional[Union[Any, str]] = None):
-        """
-        Materialize element self-weight distributed loads directly onto all elements.
-        Uses `struct_load.engine.self_weight.apply_self_weight`.
-        """
-        from struct_load.engine.self_weight import apply_self_weight as _apply_sw
-        return _apply_sw(self, direction=direction, gravity_accel=gravity_accel, units=units)
-
     def number_dofs(self):
         """
         Assign global DOF indices to each node.
@@ -110,6 +102,14 @@ class Structure:
             for i, ii in enumerate(dofs):
                 for j, jj in enumerate(dofs):
                     self.K[ii, jj] += k_g[i, j]
+
+        # Add support spring stiffness contributions to diagonal
+        for node in self.nodes.values():
+            if hasattr(node, "springs") and any(node.springs):
+                for i, k_val in enumerate(node.springs):
+                    if k_val > 0.0:
+                        dof = node.dofs[i]
+                        self.K[dof, dof] += float(k_val)
 
     def assemble_loads(self):
         """
@@ -199,6 +199,12 @@ class Structure:
         for node in self.nodes.values():
             for i, fixed_flag in enumerate(node.support):
                 dof_idx = node.dofs[i]
+                k_val = node.springs[i] if hasattr(node, "springs") else 0.0
+                if fixed_flag and k_val > 0.0:
+                    dof_name = ["ux", "uy", "uz", "rx", "ry", "rz"][i]
+                    raise ValueError(
+                        f"Node {node.id} DOF {dof_name} cannot be both restrained (fixed) and have a spring stiffness ({k_val})."
+                    )
                 if fixed_flag:
                     fixed.append(dof_idx)
                 else:
@@ -251,6 +257,14 @@ class Structure:
                 )
             else:
                 self.reactions[self.fixed_dofs] = -self.F[self.fixed_dofs]
+
+        # Add spring reactions (-k * u) at spring-supported DOFs
+        for node in self.nodes.values():
+            if hasattr(node, "springs") and any(node.springs):
+                for i, k_val in enumerate(node.springs):
+                    if k_val > 0.0:
+                        dof = node.dofs[i]
+                        self.reactions[dof] -= float(k_val) * self.disp[dof]
 
         return self.disp, self.reactions
 

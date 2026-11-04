@@ -71,9 +71,9 @@ def test_model_from_core_with_self_weight():
         Node(id=2, x=10.0, y=0.0, z=0.0),
     ]
     mat = ElasticMaterial(id="Conc", E=3e7, rho=2400.0)
-    sec = RectangularSection(id="B1", b=0.5, h=1.0)
+    sec = RectangularSection(id="B1", material_id="Conc", b=0.5, h=1.0)
     elements = [
-        BeamElement(id=1, start_node=1, end_node=2, material_id="Conc", section_id="B1"),
+        BeamElement(id=1, start_node=1, end_node=2, section_id="B1"),
     ]
     supports = [Support.fixed_3d(node_id=1)]
     lc_dead = LoadCase(id="DEAD", name="Dead Load", include_self_weight=True)
@@ -132,9 +132,9 @@ def test_model_from_core_shear_deformation():
         Node(id=2, x=0.0, y=0.0, z=5.0),
     ]
     mat = ElasticMaterial(id="Steel", E=200e6, nu=0.3)
-    sec = GeneralSection(id="Sec1", A=0.01, I3=1e-4, I2=1e-4, J=1e-4, As2=0.008, As3=0.008)
+    sec = GeneralSection(id="Sec1", material_id="Steel", A=0.01, I3=1e-4, I2=1e-4, J=1e-4, As2=0.008, As3=0.008)
     elements = [
-        BeamElement(id=1, start_node=1, end_node=2, material_id="Steel", section_id="Sec1"),
+        BeamElement(id=1, start_node=1, end_node=2, section_id="Sec1"),
     ]
     supports = [Support.fixed_3d(node_id=1)]
     lc = LoadCase(id="LC1", point_loads=[PointLoad(node_id=2, fx=100.0)])
@@ -180,9 +180,9 @@ def test_model_from_core_mass_source():
         Node(id=2, x=0.0, y=0.0, z=4.0),
     ]
     mat = ElasticMaterial(id="Steel", E=200e6, rho=7850.0)
-    sec = GeneralSection(id="ColSec", A=0.02, I2=2e-4, I3=2e-4, J=4e-4)
+    sec = GeneralSection(id="ColSec", material_id="Steel", A=0.02, I2=2e-4, I3=2e-4, J=4e-4)
     elements = [
-        BeamElement(id=1, start_node=1, end_node=2, material_id="Steel", section_id="ColSec"),
+        BeamElement(id=1, start_node=1, end_node=2, section_id="ColSec"),
     ]
     supports = [Support.fixed_3d(node_id=1)]
 
@@ -238,20 +238,20 @@ def test_model_from_core_3d_consistent_mass_conversion():
     )
 
     mat = ElasticMaterial(id="Conc", E=2.5e7, rho=2400.0)
-    sec = RectangularSection(id="ColSec", b=0.4, h=0.4)
+    sec = RectangularSection(id="ColSec", material_id="Conc", b=0.4, h=0.4)
     nodes = [
         Node(id=1, x=0.0, y=0.0, z=0.0),
         Node(id=2, x=0.0, y=0.0, z=3.5, mass=5000.0),
     ]
     elements = [
-        BeamElement(id=1, start_node=1, end_node=2, material_id="Conc", section_id="ColSec"),
+        BeamElement(id=1, start_node=1, end_node=2, section_id="ColSec"),
     ]
     supports = [Support(node_id=1, ux=True, uy=True, uz=True, rx=True, ry=True, rz=True)]
     model = StructuralModel(nodes=nodes, materials=[mat], sections=[sec], elements=elements, supports=supports)
 
     struct = model_from_core(model)
     # Density should be converted from 2400.0 kg/m^3 to 2.4 tonne/m^3
-    assert pytest.approx(struct.elements[1].material.rho, rel=1e-5) == 2.4
+    assert pytest.approx(struct.elements[1].section.material.rho, rel=1e-5) == 2.4
     # Node mass should be converted from 5000.0 kg to 5.0 tonnes
     assert pytest.approx(struct.nodes[2].mass[0], rel=1e-5) == 5.0
 
@@ -279,9 +279,9 @@ def test_model_from_core_load_cases_filtering():
         Node(id=2, x=0.0, y=0.0, z=3.0),
     ]
     mat = ElasticMaterial(id="M1", E=3e7, nu=0.2)
-    sec = RectangularSection(id="S1", b=0.3, h=0.3)
+    sec = RectangularSection(id="S1", material_id="M1", b=0.3, h=0.3)
     elements = [
-        BeamElement(id=1, start_node=1, end_node=2, material_id="M1", section_id="S1"),
+        BeamElement(id=1, start_node=1, end_node=2, section_id="S1"),
     ]
     supports = [Support(node_id=1, ux=True, uy=True, uz=True, rx=True, ry=True, rz=True)]
 
@@ -337,8 +337,8 @@ def test_ecosystem_roundtrip_units_and_unit_weight():
     struct.add_node(n2)
 
     mat = ElasticMaterial(E=30e6, nu=0.2, unit_weight=24.0)
-    sec = Section.from_rectangle(width=0.3, depth=0.5)  # A = 0.15 m^2
-    elem = FrameElement(1, n1, n2, material=mat, section=sec)
+    sec = Section.from_rectangle(width=0.3, depth=0.5, material=mat)  # A = 0.15 m^2
+    elem = FrameElement(1, n1, n2, section=sec)
     struct.add_element(elem)
 
     # Superimposed live load
@@ -359,7 +359,7 @@ def test_ecosystem_roundtrip_units_and_unit_weight():
     # Convert back to fem3d Structure
     struct_rebuilt = model_from_core(core_model)
     assert struct_rebuilt.units.force == "kN"
-    assert struct_rebuilt.elements[1].material.unit_weight == 24.0
+    assert struct_rebuilt.elements[1].section.material.unit_weight == 24.0
     # Both SelfWeight and LIVE transferred: total w = -10.0 + -3.6 = -13.6 kN/m, total load = 5.0 * 13.6 = 68.0 kN
     disp, reac = struct_rebuilt.solve()
     assert pytest.approx(reac[struct_rebuilt.nodes[1].dofs[2]], rel=1e-5) == 68.0
@@ -367,3 +367,73 @@ def test_ecosystem_roundtrip_units_and_unit_weight():
 
 
 
+
+
+@pytest.mark.skipif(not HAS_STRUCT_CORE, reason="struct_core not installed")
+def test_result_to_core_reports_internal_forces_along_members():
+    """Fixed-fixed beam under gravity UDL: |M| = wL^2/12 at the ends and wL^2/24 at midspan."""
+    from struct_core import (BeamElement, DistributedLoad, ElasticMaterial, LoadCase, Node,
+                             RectangularSection, StructuralModel, Support)
+    from struct_core.analysis_result import STANDARD_STATIONS
+
+    w, L = 10.0, 6.0
+    model = StructuralModel(
+        nodes=[Node(id=1, x=0.0, y=0.0, z=3.0), Node(id=2, x=L, y=0.0, z=3.0)],
+        materials=[ElasticMaterial(id="Conc", E=3e7, nu=0.2, rho=2400.0)],
+        sections=[RectangularSection(id="B", material_id="Conc", b=0.3, h=0.5)],
+        elements=[BeamElement(id=1, start_node=1, end_node=2, section_id="B")],
+        supports=[Support.fixed_3d(1), Support.fixed_3d(2)],
+        load_cases=[LoadCase(id="DEAD", element_loads=[DistributedLoad(element_id=1, wz=-w)])],
+    )
+    struct = model_from_core(model, load_case_id="DEAD")
+    struct.solve()
+    stations = result_to_core(struct).element_results[1].forces
+    assert [s.station for s in stations] == list(STANDARD_STATIONS)
+
+    def bending(s):
+        return max(abs(s.M2), abs(s.M3))
+
+    assert bending(stations[0]) == pytest.approx(w * L**2 / 12.0, rel=1e-6)
+    assert bending(stations[5]) == pytest.approx(w * L**2 / 24.0, rel=1e-6)
+    assert bending(stations[-1]) == pytest.approx(w * L**2 / 12.0, rel=1e-6)
+    assert max(abs(stations[0].V2), abs(stations[0].V3)) == pytest.approx(w * L / 2.0, rel=1e-6)
+
+
+def test_flexural_stiffness_modifiers_scale_bending_deflection():
+    """Cantilever column: halving both moments of inertia doubles the bending deflection in X and Y."""
+    from struct_core import (BeamElement, ElasticMaterial, LoadCase, Node, PointLoad,
+                             RectangularSection, StructuralModel, Support)
+
+    model = StructuralModel(
+        nodes=[Node(id=1, x=0.0, y=0.0, z=0.0), Node(id=2, x=0.0, y=0.0, z=3.0)],
+        materials=[ElasticMaterial(id="Conc", E=3e7, nu=0.2, rho=0.0)],
+        sections=[RectangularSection(id="C", material_id="Conc", b=0.3, h=0.5)],
+        elements=[BeamElement(id=1, start_node=1, end_node=2, section_id="C")],
+        supports=[Support.fixed_3d(1)],
+        load_cases=[LoadCase(id="H", point_loads=[PointLoad(node_id=2, fx=10.0, fy=5.0)])],
+    )
+    results = {}
+    for key, mods in (("gross", None), ("cracked", {1: 0.5})):
+        struct = model_from_core(model, load_case_id="H", flexural_stiffness_modifiers=mods)
+        struct.solve()
+        results[key] = result_to_core(struct).node_results[2].displacement
+    assert results["cracked"].ux == pytest.approx(2.0 * results["gross"].ux, rel=1e-9)
+    assert results["cracked"].uy == pytest.approx(2.0 * results["gross"].uy, rel=1e-9)
+
+
+def test_round_trip_keeps_masses_and_densities():
+    """model_to_core wrote fem3d's consistent masses (t, t/m3) as model masses (kg, kg/m3)."""
+    from struct_core import (BeamElement, ElasticMaterial, Metadata, Node, Project, RectangularSection,
+                             StructuralModel, Support, parse_units)
+    from fem3d.adapters import model_from_core, model_to_core
+
+    model = StructuralModel(
+        nodes=[Node(id=1, x=0.0, y=0.0, z=0.0), Node(id=2, x=0.0, y=0.0, z=3.0, mass=500.0)],
+        supports=[Support(node_id=1, ux=True, uy=True, uz=True, rx=True, ry=True, rz=True)],
+        materials=[ElasticMaterial(id="C", E=2.5e7, rho=2400.0)],
+        sections=[RectangularSection(id="R", b=0.3, h=0.3, material_id="C")],
+        elements=[BeamElement(id=1, start_node=1, end_node=2, section_id="R")],
+    )
+    back = model_to_core(model_from_core(Project(model=model, metadata=Metadata(units=parse_units("kN, m")))))
+    assert back.materials[0].rho == pytest.approx(2400.0)
+    assert next(n for n in back.nodes if n.id == 2).mass == pytest.approx(500.0)

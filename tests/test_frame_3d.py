@@ -430,3 +430,94 @@ def test_element_point_load_coordinates_and_properties():
     with pytest.raises(ValueError, match="Cannot specify both local components"):
         ElementPointLoad(el, p1=10.0, px=20.0, x=1.0)
 
+
+def test_frame3d_end_releases_condensation_pinned_pinned():
+    """
+    Test static condensation of fixed-end loads when major-axis moments are released.
+    For a simply-supported beam with uniform load w:
+    - Reactions: Ry = w * L / 2, M = 0
+    - Element forces: V = w * L / 2, M = 0 at both released ends
+    """
+    mat = ElasticMaterial(200e6, nu=0.3, rho=7850)
+    sec = Section(A=0.01, I2=1e-4, I3=1e-4, J=2e-4, material=mat)
+
+    s = Structure()
+    n1 = Node(1, 0.0, 0.0, 0.0)
+    n2 = Node(2, 6.0, 0.0, 0.0)
+    s.add_node(n1)
+    s.add_node(n2)
+
+    n1.set_support([True, True, True, True, True, True])
+    n2.set_support([True, True, True, True, True, True])
+
+    rel_i = [False, False, False, False, False, True]
+    rel_j = [False, False, False, False, False, True]
+
+    el = FrameElement(1, n1, n2, sec, releases_i=rel_i, releases_j=rel_j)
+    s.add_element(el)
+
+    DistributedLoad.local(el, w2=-10.0)
+    s.solve()
+
+    reac_1 = s.reactions[n1.dofs]
+    reac_2 = s.reactions[n2.dofs]
+    forces = el.get_local_forces()
+
+    # Reactions: shears = 30 kN, moments = 0
+    assert pytest.approx(reac_1[2], abs=1e-6) == 30.0
+    assert pytest.approx(reac_2[2], abs=1e-6) == 30.0
+    assert pytest.approx(reac_1[4], abs=1e-6) == 0.0
+    assert pytest.approx(reac_2[4], abs=1e-6) == 0.0
+
+    # Element forces: end moments M3 must be 0, not fixed-fixed wL^2/12 = 30
+    assert pytest.approx(forces[5], abs=1e-6) == 0.0
+    assert pytest.approx(forces[11], abs=1e-6) == 0.0
+    assert pytest.approx(forces[1], abs=1e-6) == 30.0
+    assert pytest.approx(forces[7], abs=1e-6) == 30.0
+
+
+def test_frame3d_end_releases_condensation_propped_cantilever():
+    """
+    Test static condensation for propped cantilever (pinned-fixed).
+    For w = -10 kN/m, L = 6 m:
+    - Pinned end (node 1): R = 3*w*L/8 = 22.5 kN, M = 0
+    - Fixed end (node 2): R = 5*w*L/8 = 37.5 kN, M = w*L^2/8 = 45.0 kNm
+    """
+    mat = ElasticMaterial(200e6, nu=0.3, rho=7850)
+    sec = Section(A=0.01, I2=1e-4, I3=1e-4, J=2e-4, material=mat)
+
+    s = Structure()
+    n1 = Node(1, 0.0, 0.0, 0.0)
+    n2 = Node(2, 6.0, 0.0, 0.0)
+    s.add_node(n1)
+    s.add_node(n2)
+
+    n1.set_support([True, True, True, True, True, True])
+    n2.set_support([True, True, True, True, True, True])
+
+    rel_i = [False, False, False, False, False, True]
+    rel_j = None
+
+    el = FrameElement(1, n1, n2, sec, releases_i=rel_i, releases_j=rel_j)
+    s.add_element(el)
+
+    DistributedLoad.local(el, w2=-10.0)
+    s.solve()
+
+    reac_1 = s.reactions[n1.dofs]
+    reac_2 = s.reactions[n2.dofs]
+    forces = el.get_local_forces()
+
+    # Reactions
+    assert pytest.approx(reac_1[2], abs=1e-6) == 22.5
+    assert pytest.approx(reac_2[2], abs=1e-6) == 37.5
+    assert pytest.approx(reac_1[4], abs=1e-6) == 0.0
+    assert pytest.approx(reac_2[4], abs=1e-6) == 45.0
+
+    # Element forces
+    assert pytest.approx(forces[5], abs=1e-6) == 0.0
+    assert pytest.approx(forces[11], abs=1e-6) == -45.0
+    assert pytest.approx(forces[1], abs=1e-6) == 22.5
+    assert pytest.approx(forces[7], abs=1e-6) == 37.5
+
+

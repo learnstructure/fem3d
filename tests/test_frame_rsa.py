@@ -45,6 +45,8 @@ def test_frame_rsa_asce7_22():
         sd1=0.40,
         tl=8.0,
         site_class="D",
+        risk_category="II",
+        system_type="rc_smf",
         damping_ratio=0.05,
     )
 

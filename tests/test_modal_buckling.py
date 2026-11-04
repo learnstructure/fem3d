@@ -31,9 +31,9 @@ def test_modal_analysis_cantilever():
     I2 = 80.0
     I3 = 200.0
     J = 50.0
-    sec = Section(A=A, I2=I2, I3=I3, J=J)
+    sec = Section(A=A, I2=I2, I3=I3, J=J, material=mat)
 
-    elem = FrameElement(1, n1, n2, material=mat, section=sec)
+    elem = FrameElement(1, n1, n2, section=sec)
     struct.add_element(elem)
 
     # Free tip dummy solve to initialize DOFs
@@ -72,10 +72,10 @@ def test_buckling_analysis_cantilever():
     I2 = 50.0   # weak axis
     I3 = 150.0  # strong axis
     J = 30.0
-    sec = Section(A=A, I2=I2, I3=I3, J=J)
     mat = ElasticMaterial(E=E)
+    sec = Section(A=A, I2=I2, I3=I3, J=J, material=mat)
 
-    elem = FrameElement(1, n1, n2, material=mat, section=sec)
+    elem = FrameElement(1, n1, n2, section=sec)
     struct.add_element(elem)
 
     # Reference axial compressive load at top (downward in -Z direction)
