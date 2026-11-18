@@ -167,6 +167,23 @@ class FrameElement(ElementBase):
         if hasattr(self, "_raw_eq_load_local"):
             self._condense_loads()
 
+    def shear_parameters(self) -> tuple:
+        """Timoshenko shear parameters (phi_2, phi_3) = (12 E I3 / (G As2 L^2), 12 E I2 / (G As3 L^2)).
+
+        phi_2 belongs to bending in the local 1-2 plane (about axis 3), phi_3 to bending in the 1-3 plane (about
+        axis 2), as in the Timoshenko stiffness matrix of Przemieniecki (1968). Both are zero without shear
+        deformation or without a shear area.
+        The stiffness matrix and the equivalent nodal loads of member loads (fem3d.loads) use the same values.
+        """
+        if not self.include_shear_deformation:
+            return 0.0, 0.0
+        E, G, L = self.material.E, self.material.G, self.length
+        as2 = getattr(self.section, "As2", 0.0) or 0.0
+        as3 = getattr(self.section, "As3", 0.0) or 0.0
+        phi_2 = 12.0 * E * self.I3 / (G * as2 * L * L) if as2 > 0 else 0.0
+        phi_3 = 12.0 * E * self.I2 / (G * as3 * L * L) if as3 > 0 else 0.0
+        return phi_2, phi_3
+
     def _unreleased_local_stiffness(self) -> np.ndarray:
         """
         Return the 12x12 element stiffness matrix in local coordinates.
@@ -183,17 +200,7 @@ class FrameElement(ElementBase):
         I3 = self.I3
         J = self.J
         L = self.length
-
-        # Timoshenko shear factors: phi_2 (for bending in 1-2 about 3) and phi_3 (for bending in 1-3 about 2)
-        phi_2 = 0.0
-        phi_3 = 0.0
-        if self.include_shear_deformation:
-            as2 = getattr(self.section, "As2", 0.0)
-            as3 = getattr(self.section, "As3", 0.0)
-            if as2 > 0:
-                phi_2 = 12.0 * E * I3 / (G * as2 * L * L)
-            if as3 > 0:
-                phi_3 = 12.0 * E * I2 / (G * as3 * L * L)
+        phi_2, phi_3 = self.shear_parameters()
 
         k = np.zeros((12, 12), dtype=float)
 
@@ -434,8 +441,12 @@ class FrameElement(ElementBase):
           ASCE Journal of the Structural Division, 89(ST4), 161-178.
         """
         L = self.length
-        total_density = self.material.rho * self.area + self.mass
+        total_density = self.material.rho * self.area + self.mass  # translational mass per unit length
         m_total = total_density * L
+        # Rotational inertias come from the material's mass density times second moments of area (rho * I per
+        # unit length); the added mass per length (self.mass) has no known rotational inertia.
+        rho = self.material.rho
+        I_p = self.I2 + self.I3  # polar moment of area
 
         m = np.zeros((12, 12), dtype=float)
 
@@ -452,10 +463,11 @@ class FrameElement(ElementBase):
 
             # Rotational lumped inertias (optional, False by default matching SAP2000/ETABS)
             if include_rotational_inertia:
-                I_polar = self.I2 + self.I3
-                m[3, 3] = total_density * I_polar * L / 24.0
-                m[4, 4] = total_density * self.I2 * L / 24.0
-                m[5, 5] = total_density * self.I3 * L / 24.0
+                # Torsion: half the member's polar mass moment at each node, rho * I_p * L / 2 (as the axial
+                # masses); bending rotations: rho * I * L / 24, as in fem2d
+                m[3, 3] = rho * I_p * L / 2.0
+                m[4, 4] = rho * self.I2 * L / 24.0
+                m[5, 5] = rho * self.I3 * L / 24.0
                 m[9, 9] = m[3, 3]
                 m[10, 10] = m[4, 4]
                 m[11, 11] = m[5, 5]
@@ -469,9 +481,8 @@ class FrameElement(ElementBase):
         m[6, 0] = m_axial[1, 0]
         m[6, 6] = m_axial[1, 1]
 
-        # 2. Torsional mass
-        I_p = self.I2 + self.I3
-        m_torsion = (total_density * I_p * L / 6.0) * np.array([[2.0, 1.0], [1.0, 2.0]])
+        # 2. Torsional mass: consistent with the linear twist interpolation, as the axial mass with rho * I_p
+        m_torsion = (rho * I_p * L / 6.0) * np.array([[2.0, 1.0], [1.0, 2.0]])
         m[3, 3] = m_torsion[0, 0]
         m[3, 9] = m_torsion[0, 1]
         m[9, 3] = m_torsion[1, 0]

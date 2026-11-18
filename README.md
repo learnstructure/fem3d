@@ -517,7 +517,10 @@ print(load_glob.global_components)
 print(load_glob.local_components)
 ```
 
-Fixed-end equivalent nodal forces (exact for uniform load, Euler-Bernoulli):
+Equivalent nodal loads are the work of the load on the exact deflected shapes of the member
+(`fem3d.loads.bending_shape_functions`: Hermite cubics, or the exact Timoshenko shapes for members with shear
+deformation), so the fixed-end forces are exact for uniform, trapezoidal, partial, and concentrated loads and moments.
+For a full-span uniform load on an Euler-Bernoulli member they are:
 
 | Direction | Shear reactions | End moments |
 |-----------|----------------|-------------|

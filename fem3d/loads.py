@@ -6,6 +6,42 @@ from typing import Union, Optional
 import numpy as np
 
 
+def bending_shape_functions(x: float, length: float, phi: float = 0.0):
+    """Exact interpolation of a two-node Timoshenko beam in one bending plane, at distance ``x`` from node i.
+
+    Returns ``(Nv, Npsi)``: the transverse displacement ``v(x)`` and the cross-section rotation ``psi(x)`` caused by
+    a unit value of each end DOF ``(v_i, psi_i, v_j, psi_j)`` with the others zero. They solve the unloaded
+    Timoshenko beam (EI psi'' + kGA (v' - psi) = 0, (v' - psi)' = 0), so they are the exact deflected shapes of the
+    element whose stiffness uses the same shear parameter ``phi = 12 EI / (kGA L^2)`` (Friedman and Kosmatka 1993,
+    "An improved two-node Timoshenko beam finite element", Computers & Structures 47(3)). With ``phi = 0`` they are
+    the Hermite cubics and their slopes.
+
+    By the reciprocal theorem the equivalent nodal loads (negative fixed-end reactions) of a member load are the
+    work of the load on these shapes: sum of w(x) Nv(x) dx for transverse forces, m Npsi(a) for a moment at a.
+    """
+    xi = x / length
+    d = 1.0 + phi
+    nv = (
+        (2.0 * xi**3 - 3.0 * xi**2 - phi * xi + 1.0 + phi) / d,
+        length * (xi**3 - (2.0 + 0.5 * phi) * xi**2 + (1.0 + 0.5 * phi) * xi) / d,
+        (-2.0 * xi**3 + 3.0 * xi**2 + phi * xi) / d,
+        length * (xi**3 - (1.0 - 0.5 * phi) * xi**2 - 0.5 * phi * xi) / d,
+    )
+    npsi = (
+        6.0 * (xi**2 - xi) / (d * length),
+        (3.0 * xi**2 - (4.0 + phi) * xi + 1.0 + phi) / d,
+        -6.0 * (xi**2 - xi) / (d * length),
+        (3.0 * xi**2 - (2.0 - phi) * xi) / d,
+    )
+    return nv, npsi
+
+
+def _shear_parameters(element) -> tuple:
+    """(phi_2, phi_3) of a frame element; zero for elements without shear deformation (e.g. trusses)."""
+    get = getattr(element, "shear_parameters", None)
+    return get() if get is not None else (0.0, 0.0)
+
+
 class PointLoad:
     """
     Represents a concentrated 3D force and moment load acting on a node.
@@ -294,8 +330,13 @@ class DistributedLoad(ElementLoad):
         """
         Compute work-equivalent nodal forces and moments in local coordinates via 3-point Gauss-Legendre quadrature.
         Supports uniform and linearly varying distributed loads on full or partial spans [start, end].
+
+        The transverse components use the exact Timoshenko shapes of the element (:func:`bending_shape_functions`,
+        Hermite cubics without shear deformation), so the fixed-end forces are exact for shear-deformable members
+        too. The shapes are cubic and the load linear: 3-point Gauss quadrature is exact.
         """
         L = self.element.length
+        phi_2, phi_3 = _shear_parameters(self.element)
         eq = np.zeros(12, dtype=float)
         gp = [-np.sqrt(0.6), 0.0, np.sqrt(0.6)]
         gw = [5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0]
@@ -311,32 +352,25 @@ class DistributedLoad(ElementLoad):
             cur_w1 = self.w1 + alpha * (self.w1_end - self.w1)
             cur_w2 = self.w2 + alpha * (self.w2_end - self.w2)
             cur_w3 = self.w3 + alpha * (self.w3_end - self.w3)
-
-            n_ax1 = 1.0 - mu
-            n_ax2 = mu
-
-            n_tr1 = 1.0 - 3.0 * mu**2 + 2.0 * mu**3
-            n_tr2 = x * (1.0 - mu)**2
-            n_tr3 = 3.0 * mu**2 - 2.0 * mu**3
-            n_tr4 = x * (mu**2 - mu)
-
+            nv2, _ = bending_shape_functions(x, L, phi_2)
+            nv3, _ = bending_shape_functions(x, L, phi_3)
             wt = w * half_len
 
             # Axial (local axis 1)
-            eq[0] += wt * n_ax1 * cur_w1
-            eq[6] += wt * n_ax2 * cur_w1
+            eq[0] += wt * (1.0 - mu) * cur_w1
+            eq[6] += wt * mu * cur_w1
 
-            # Transverse w2 (bending in 1-2 about axis 3)
-            eq[1] += wt * n_tr1 * cur_w2
-            eq[5] += wt * n_tr2 * cur_w2
-            eq[7] += wt * n_tr3 * cur_w2
-            eq[11] += wt * n_tr4 * cur_w2
+            # Transverse w2 (bending in 1-2 about axis 3; theta_3 = psi)
+            eq[1] += wt * nv2[0] * cur_w2
+            eq[5] += wt * nv2[1] * cur_w2
+            eq[7] += wt * nv2[2] * cur_w2
+            eq[11] += wt * nv2[3] * cur_w2
 
-            # Transverse w3 (bending in 1-3 about axis 2)
-            eq[2] += wt * n_tr1 * cur_w3
-            eq[4] += wt * (-n_tr2) * cur_w3
-            eq[8] += wt * n_tr3 * cur_w3
-            eq[10] += wt * (-n_tr4) * cur_w3
+            # Transverse w3 (bending in 1-3 about axis 2; theta_2 = -psi)
+            eq[2] += wt * nv3[0] * cur_w3
+            eq[4] -= wt * nv3[1] * cur_w3
+            eq[8] += wt * nv3[2] * cur_w3
+            eq[10] -= wt * nv3[3] * cur_w3
 
         return eq
 
@@ -563,47 +597,35 @@ class ElementPointLoad(ElementLoad):
         return cls(element, px=px, py=py, pz=pz, mx=mx, my=my, mz=mz, x=x, coord_system="global")
 
     def _compute_equivalent_loads(self) -> np.ndarray:
+        """Work-equivalent nodal loads in local coordinates: forces do work on the transverse shapes, moments on
+        the cross-section rotations of :func:`bending_shape_functions` (exact for Timoshenko members)."""
         L = self.element.length
         a = self.x
         b = L - a
         if a < 0.0 or a > L:
             raise ValueError(f"Load position x={a} is outside element span [0, {L}].")
+        phi_2, phi_3 = _shear_parameters(self.element)
+        nv2, npsi2 = bending_shape_functions(a, L, phi_2)
+        nv3, npsi3 = bending_shape_functions(a, L, phi_3)
 
         eq = np.zeros(12, dtype=float)
 
-        # Axial p1
+        # Axial p1 and torsion m1 (linear interpolation)
         eq[0] = self.p1 * (b / L)
         eq[6] = self.p1 * (a / L)
-
-        # Transverse p2 (bending in 1-2 about axis 3)
-        eq[1] = self.p2 * (b**2 * (3.0 * a + b)) / (L**3)
-        eq[5] = self.p2 * (a * b**2) / (L**2)
-        eq[7] = self.p2 * (a**2 * (a + 3.0 * b)) / (L**3)
-        eq[11] = -self.p2 * (a**2 * b) / (L**2)
-
-        # Transverse p3 (bending in 1-3 about axis 2)
-        eq[2] = self.p3 * (b**2 * (3.0 * a + b)) / (L**3)
-        eq[4] = -self.p3 * (a * b**2) / (L**2)
-        eq[8] = self.p3 * (a**2 * (a + 3.0 * b)) / (L**3)
-        eq[10] = self.p3 * (a**2 * b) / (L**2)
-
-        # Torsion m1
         eq[3] = self.m1 * (b / L)
         eq[9] = self.m1 * (a / L)
 
-        # Concentrated moment m3 (bending in 1-2 about axis 3)
-        if abs(self.m3) > 1e-12:
-            eq[1] -= (6.0 * a * b * self.m3) / (L**3)
-            eq[7] += (6.0 * a * b * self.m3) / (L**3)
-            eq[5] += (b * (2.0 * a - b) * self.m3) / (L**2)
-            eq[11] += (a * (2.0 * b - a) * self.m3) / (L**2)
+        # Bending in 1-2 about axis 3 (DOFs v2_i, theta3_i, v2_j, theta3_j; theta_3 = psi):
+        # force p2 on the deflections, moment m3 on the rotations
+        for k, dof in enumerate((1, 5, 7, 11)):
+            eq[dof] = self.p2 * nv2[k] + self.m3 * npsi2[k]
 
-        # Concentrated moment m2 (bending in 1-3 about axis 2)
-        if abs(self.m2) > 1e-12:
-            eq[2] += (6.0 * a * b * self.m2) / (L**3)
-            eq[8] -= (6.0 * a * b * self.m2) / (L**3)
-            eq[4] += (b * (2.0 * a - b) * self.m2) / (L**2)
-            eq[10] += (a * (2.0 * b - a) * self.m2) / (L**2)
+        # Bending in 1-3 about axis 2 (DOFs v3_i, theta2_i, v3_j, theta2_j; theta_2 = -psi): the rotation DOFs
+        # enter v3 with a minus sign, and m2 does work on theta_2 = -psi
+        for k, dof in enumerate((2, 4, 8, 10)):
+            sign = -1.0 if k in (1, 3) else 1.0
+            eq[dof] = sign * self.p3 * nv3[k] - sign * self.m2 * npsi3[k]
 
         return eq
 

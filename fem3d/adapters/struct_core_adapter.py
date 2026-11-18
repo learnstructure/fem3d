@@ -63,6 +63,25 @@ from ..structure import Structure
 from ..results import Results
 
 
+def _apply_mass_modifier(element: Any, base_section: Any, modifiers: Dict[str, float]) -> None:
+    """Give a frame element the mass of struct_core's modifiers, as SAP2000 and ETABS define them.
+
+    The mass modifier scales all the member's mass (translational and rotational); the A modifier scales the axial
+    stiffness only. The element's mass is rho x (its area) per length plus ``element.mass``, and its rotational
+    inertia rho x I: the element gets a copy of its material with rho x mass modifier, and ``element.mass`` the
+    difference rho x mass x A0 x (1 - A modifier), so that its mass per length is rho x A0 x mass (A0: unmodified).
+    """
+    mass_mod = float(modifiers.get("mass", 1.0))
+    area_mod = float(modifiers.get("A", 1.0))
+    if mass_mod == 1.0 and area_mod == 1.0:
+        return
+    rho = base_section.material.rho
+    if mass_mod != 1.0:
+        element.material = copy.copy(element.material)
+        element.material.rho = rho * mass_mod
+    element.mass += rho * mass_mod * base_section.A * (1.0 - area_mod)
+
+
 def _check_struct_core():
     if not _STRUCT_CORE_AVAILABLE:
         raise ImportError(
@@ -294,6 +313,8 @@ def model_from_core(
                 releases_i=releases_i_3d,
                 releases_j=releases_j_3d,
             )
+            if elem_mods:
+                _apply_mass_modifier(fem_el, sec_map[elem.section_id], elem_mods)
 
         structure.add_element(fem_el)
 
