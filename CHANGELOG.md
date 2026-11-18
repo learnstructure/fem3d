@@ -7,6 +7,10 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 ## [Unreleased]
 
 ### Added
+- `tests/test_shell_structure.py`: the twist of a thick strip (CSI Problem 2-002, load case 4) converges to the
+  closed-form torsion of a Reissner-Mindlin strip with free edges (0.1 percent on 96x16), which for this strip is
+  within 0.3 percent of the Saint-Venant value; SAP2000 converges to the shell-theory value b t^3 / 3 instead
+  (SHELL_PLAN.md, M6).
 - Shell elements in `Structure` (SHELL_PLAN.md, M5): `ShellElement` (`fem3d.elements.shell`), a four-node flat shell
   that combines the membrane (M3) and the MITC4 plate (M4), six DOFs per node, with `behavior` "shell",
   "membrane", or "plate", membrane and bending thicknesses, and the SAP2000 local axes of
@@ -64,6 +68,9 @@ All notable changes to `fem3d` are recorded in this file. The format follows
   point load gives the same solution as a mesh with a node at the load, with and without end releases.
 
 ### Changed
+- `ShellBatch.areas()` is the area of the flat element (projected on the plane normal to axis 3); it differs from
+  `struct_core.geometry.shell_areas` by at most 1e-4 for nearly planar warped elements, whose axis 3 is now the
+  normal of the plane through j1, j2, j3 (struct_core 'Changed').
 - `Structure._auto_fix_unstable_dofs` finds the elements at each node in one pass over the elements (it compared
   every node with every element); the rules are unchanged.
 - A singular stiffness matrix is reported from the sparse LU factorization, with the same `LinAlgError` message.

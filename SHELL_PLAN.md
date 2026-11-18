@@ -264,8 +264,9 @@ read in the manual's text):
 - Rigid links of warped corners: u1_flat = u1 - d theta2, u2_flat = u2 + d theta1, with d the height of the corner
   above the mean plane (Wilson Eq. 10.2, his d being the offset of the mid-surface node from the flat node). A free
   warped element has exactly six zero eigenvalues and no force under any rigid rotation, which fixes the sign.
-- Areas are those of the mean-plane element (equal to `struct_core.geometry.shell_areas`); lumped mass uses
-  `shell_corner_weights`, so fem3d and struct_load's mass source lump shell mass identically.
+- Areas are those of the flat element (projected on the plane normal to axis 3); lumped mass uses
+  `shell_corner_weights`, as struct_load's mass source does. The area equals `struct_core.geometry.shell_areas`
+  except for nearly planar warped elements, where they differ by a factor of at least 0.9999 (M6).
 - With a mass source, struct_load already lumps the shells' self-mass at the nodes (M1), so the adapter gives the
   shells a copy of their material with rho = 0; without a mass source they carry rho x th. Frames are unchanged.
 - The agent's analysis tools refuse models with shells (`struct_agent.tools.analysis.shell_model_refusal`): its
@@ -292,7 +293,11 @@ twisted beam converges about 1 percent above MacNeal and Harder's beam-theory va
 within 2 percent on the 12x2 mesh (their Table 10), and the strip is thick (t/w = 0.29), so the test tolerance is 1.5
 percent. The comparison with SAP2000 under mesh refinement is M6.
 
-## M6. Comparison with SAP2000 (struct_link live session) `[ ]`
+## M6. Comparison with SAP2000 (struct_link live session) `[x]` 18 November 2026
+
+Done with SAP2000 27.1.0: struct_link's `Sap2000LiveSession` pushes and reads shells; tests in
+`struct_link/tests/test_sap2000_shells.py` (models in `shell_problems.py`, SAP2000 values in
+`fixtures/sap2000_shells.json`, 307 kB); fem3d's twist closed form in `fem3d/tests/test_shell_structure.py`.
 
 - Push shell sections (`PropArea.SetShell_1`), area objects, local axes, pressure loads, and self-weight; pull
   `AreaForceShell` and `AreaElm.GetTransformationMatrix`.
@@ -301,6 +306,52 @@ percent. The comparison with SAP2000 under mesh refinement is M6.
 - SAP2000 results stored as JSON fixtures, so that the tests also run without SAP2000; live tests regenerate them
   where SAP2000 is installed. Convergence checks only, as stated in Decisions.
 - `.s2k` and `.e2k` exchange of area objects stays in ROADMAP.md §1b.
+
+Findings:
+
+- **A struct_link bug, fixed.** SAP2000's auto merge tolerance (0.1 in for lb-in) silently discarded every area of the
+  16x16 plate of Problem 2-005 (sides of 1/16 in): `AreaObj.AddByPoint` returned success, the analysis ran without
+  elements, and only the empty `AreaForceShell` output showed it. The push now sets the tolerance to 1e-3 of the
+  shortest side and checks the object counts.
+- **Local axes of warped elements (not in the CSI manual).** SAP2000 applies its orientation rules to the plane
+  through j1, j2, j3 (the area object's axes), then gives the analysis element axis 3 from the midpoints of opposite
+  sides (§10.6.1) and axis 2 as the projection of the object's axis 2; elements whose two normals are within 0.81
+  degrees keep the j1-j2-j3 plane (the switch lies between 0.788 and 0.818 degrees for three shapes and two sizes,
+  so the test is a cosine of 1 - 1e-4). `struct_core.geometry.shell_local_axes` now does the same. The element axes
+  of 20 pushed panels (including warped, nearly horizontal, angled, and reference-vector cases) and of 1166 sampled
+  elements of the 54 verification models (12,359 areas) equal SAP2000's to round-off. Before, the 24 warped elements
+  of Problem 2-004 differed by up to 61 degrees in their in-plane axes.
+- **SAP2000 subdivides strongly warped areas** in its analysis model without a message (seen from about 12 to 16
+  degrees of warping, by a criterion that is not a single shape measure). The session refuses to read results of such
+  an area, whose corners then belong to different elements.
+- **SAP2000's thick plate is not MITC4** (CSI cites its own DSE/DKE family). Its transverse shears are constant over
+  each element, and its torsion is that of thin-plate theory (J = b t^3 / 3), whereas MITC4 resolves the edge zone of
+  Reissner-Mindlin theory. Its corner membrane stresses omit the strain of its incompatible modes: under pure bending
+  of a 6x1 strip it reports F11 = 150 / (1 - nu^2) and F22 = nu F11 where the exact values are 150 and 0 (fem3d gives
+  150.0 and 0.0); refinement removes the error.
+- Displacements agree to 7e-5 on the 4x4 roof, and the self-weight of areas (360 pcf x th) equals the 90 psf load in
+  both programs.
+
+Results on the finest meshes (fem3d against SAP2000, and both against the closed forms; tolerances in the tests):
+
+| Quantity | SAP2000 | fem3d | Closed form or reference |
+|---|---|---|---|
+| Scordelis-Lo 16x16, free-edge deflection (ft) | 0.30196 | 0.30167 | 0.3024 (MacNeal and Harder) |
+| Plate 2-005 16x16, simple, uniform / point | 4.0625 / 11.606 | 4.0611 / 11.594 | 4.0624 / 11.601 (Navier) |
+| Plate 2-005 16x16, clamped, uniform / point | 1.2675 / 5.6105 | 1.2644 / 5.5962 | 1.26 / 5.60 (Timoshenko) |
+| Strip 2-002 48x8, in-plane shear / out-of-plane | 0.10789 / 0.43006 | 0.10790 / 0.43094 | root fully fixed here |
+| Strip 2-002 48x8, twist (in) | 0.002348 | 0.003379 (96x16: 0.003416) | 0.00234 (b t^3 / 3) / 0.003417 (Reissner-Mindlin) |
+| Twisted beam 48x8, in-plane / out-of-plane | 0.005406 / 0.001754 | 0.005480 / 0.001771 | 0.005424 / 0.001754 (beam theory) |
+| Plate center M11, simple, 16x16 (1e-5 lb-in/in) | 1.918 | 1.915 | 1.916 (Table 8) |
+| Plate edge V13, simple, 4 / 8 / 16 (1e-5 lb/in) | -1.40 / -3.02 / -5.12 | -5.68 / -6.17 / -6.45 | -6.75 (Timoshenko Eq. p) |
+| Clamped edge M11, 4 / 8 / 16 (1e-5 lb-in/in) | -1.34 / -1.77 / -1.98 | -1.24 / -1.58 / -1.80 | -2.05 (Table 35) |
+| Strip midspan top F11, unit moment, 6x1 / 48x8 (lb/in) | 164.6 / 151.8 | 150.0 / 150.0 | 150 |
+
+The twisted beam converges 1 to 1.5 percent apart because of the torsion difference above (the strip is thick,
+t / width = 0.29). MITC4 moments are constant along their bending direction within an element, so corner moments at
+a clamped edge converge at first order; its transverse shears at a free edge carry the Reissner-Mindlin boundary layer
+(V13 at the free-edge midspan of the roof decreases only slowly, -148 to -100 lb/ft from 8x8 to 64x64, where
+SAP2000 gives about -5).
 
 ## M7. Documentation and checks `[ ]`
 

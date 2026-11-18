@@ -207,10 +207,10 @@ class ShellBatch:
         return np.einsum("nai,nab,nbj->nij", B, self.local_stiffness(), B)
 
     def areas(self) -> np.ndarray:
-        """Area of each element on its mean plane (equals ``struct_core.geometry.shell_areas``)."""
-        from struct_core.geometry import shell_areas
-
-        return shell_areas(self.coords)
+        """Area of each element projected on its plane (normal to axis 3), the area of the flat element. It equals
+        ``struct_core.geometry.shell_areas`` except for nearly planar warped elements, whose axis 3 is the normal of
+        the plane through j1, j2, j3 (``shell_local_axes``, Notes): they differ by a factor of at least 0.9999."""
+        return self.nodal_areas().sum(axis=1)
 
     def mass(self, lumped: bool) -> np.ndarray:
         """Mass (N, 24, 24) on the global DOFs, translations only (CSI §10.11)."""

@@ -5,6 +5,8 @@ problems (Scordelis-Lo roof, CSI Problem 2-006; twisted beam, Problem 2-004) as 
 with the tolerances stated in each test.
 """
 
+import math
+
 import numpy as np
 import pytest
 
@@ -330,3 +332,37 @@ def test_response_spectrum_combines_shell_resultants():
         assert np.allclose(combined[sid]["gauss_points"], np.abs(gauss[i]))
         assert np.allclose(combined[sid]["corners"], np.abs(corners[i]))
     assert max(np.abs(c["gauss_points"]).max() for c in combined.values()) > 0
+
+
+def test_twist_of_a_thick_strip_converges_to_reissner_mindlin_torsion():
+    """CSI Problem 2-002, load case 4: strip 6 x 0.2 in, t = 0.1 in, E = 1e7 psi, nu = 0.3, root fixed, unit torque.
+
+    Closed form of a Reissner-Mindlin strip of width b with free edges under a twist rate a (Bathe Eqs. 5.88 to 5.97
+    with w = a x y, beta_y = a x): moment equilibrium d M12 / d y = V13 with M12 = (G t^3 / 12)(d beta_x / dy + a)
+    and V13 = k G t (a y - beta_x) gives beta_x = a y + C sinh(mu y), mu^2 = 12 k / t^2; M12 = 0 at the free edges
+    fixes C, and the torque (twisting moments plus the couple of the transverse shears) is G a J with
+    J = (b t^3 / 3)(1 - tanh(mu b / 2) / (mu b / 2)). For b / t = 2 this is 0.2284 b t^3, within 0.3 percent of the
+    Saint-Venant constant 0.229 b t^3 of CSI's hand calculation (0.00341 in), and well below the shell-theory value
+    b t^3 / 3 (0.00234 in) that SAP2000 converges to (struct_link/tests/test_sap2000_shells.py)."""
+    E, nu, L, b, t = 1.0e7, 0.3, 6.0, 0.2, 0.1
+    G = E / (2 * (1 + nu))
+    mu = math.sqrt(12 * 5 / 6) / t
+    J = b * t**3 / 3 * (1 - math.tanh(mu * b / 2) / (mu * b / 2))
+    exact = L / (G * J) * (b / 2)  # Y displacement of the top tip node under a unit torque
+
+    def twist(n_long, n_deep):
+        pts = [(L * i / n_long, 0.0, b * j / n_deep) for i in range(n_long + 1) for j in range(n_deep + 1)]
+        nid = lambda i, j: i * (n_deep + 1) + j  # noqa: E731
+        quads = [[nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)]
+                 for i in range(n_long) for j in range(n_deep)]
+        s, nodes = structure_from(pts, quads, ElasticMaterial(E=E, nu=nu), t,
+                                  supports=[(nid(0, j), [True] * 6) for j in range(n_deep + 1)])
+        s.add_load(PointLoad(nodes[nid(n_long, 0)], fy=-5.0))
+        s.add_load(PointLoad(nodes[nid(n_long, n_deep)], fy=5.0))
+        s.solve()
+        return s.disp[nodes[nid(n_long, n_deep)].dofs[1]]
+
+    values = [twist(24, 4), twist(48, 8), twist(96, 16)]
+    assert values[0] < values[1] < values[2]
+    assert values[2] == pytest.approx(exact, rel=0.001)
+
