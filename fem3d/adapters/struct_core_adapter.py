@@ -143,6 +143,12 @@ def model_from_core(
     else:
         model = source
 
+    if getattr(model, "shell_elements", None):
+        raise NotImplementedError(
+            f"fem3d does not analyze shell elements yet (fem3d/SHELL_PLAN.md, milestone M5); the model has "
+            f"{len(model.shell_elements)}."
+        )
+
     active_units = parse_units(
         units
         or getattr(getattr(source, "metadata", None), "units", None)

@@ -202,7 +202,8 @@ class Results:
 
         lines.append("Global Structure Stiffness Matrix K")
         lines.append("-" * 80)
-        lines.append(self._format_array(self.structure.K))
+        K = self.structure.K
+        lines.append(self._format_array(K.toarray() if K is not None and hasattr(K, "toarray") else K))
         lines.append("")
 
         lines.append("Global Structure Load Vector F")

@@ -7,6 +7,18 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 ## [Unreleased]
 
 ### Added
+- Sparse assembly and solution (SHELL_PLAN.md, M2): `Structure.K` and `Structure.M` are `scipy.sparse` CSR
+  matrices, assembled from element blocks in COO form (`Structure._assemble_sparse`, which also takes vectorized
+  blocks of N elements for the shell elements to come). The static system is solved by sparse LU (SuperLU);
+  reactions are computed from the sparse partitions. `get_reduced_matrices` returns sparse matrices, which
+  structdyn makes dense for models up to `structdyn.mdf.mdf.DENSE_DOF_LIMIT` DOFs, so frame models follow the
+  same modal path as before. Frame results are unchanged to round-off: `tests/test_sparse_assembly.py` compares
+  K, M, displacements, and reactions with the former dense assembly and solution, the modal periods on both
+  sides of the dense limit, and the modal and response spectrum analysis of a 2904-DOF frame.
+- `buckling_analysis.assemble_geometric_stiffness` returns a sparse Kg; the reduced eigenproblem is still
+  solved densely.
+- `SHELL_PLAN.md`: the implementation plan of shell elements (ROADMAP §4).
+- `model_from_core` refuses models with shell elements until fem3d analyzes them (SHELL_PLAN.md, M5).
 - `fem3d.loads.bending_shape_functions`: the exact interpolation (deflection and cross-section rotation) of a
   two-node Timoshenko beam, which reduces to the Hermite cubics without shear deformation.
 - `FrameElement.shear_parameters()`: the shear parameters (phi_2, phi_3) used by both the stiffness matrix and the
@@ -15,6 +27,11 @@ All notable changes to `fem3d` are recorded in this file. The format follows
   loads of distributed loads (full, partial, trapezoidal) and of point forces and moments equal the fixed-end forces
   of the flexibility (unit-load) method, with and without shear deformation, in both bending planes; and a member
   point load gives the same solution as a mesh with a node at the load, with and without end releases.
+
+### Changed
+- `Structure._auto_fix_unstable_dofs` finds the elements at each node in one pass over the elements (it compared
+  every node with every element); the rules are unchanged.
+- A singular stiffness matrix is reported from the sparse LU factorization, with the same `LinAlgError` message.
 
 ### Fixed
 - Member loads on Timoshenko members (`include_shear_deformation=True`): the equivalent nodal loads of

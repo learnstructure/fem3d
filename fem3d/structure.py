@@ -2,8 +2,10 @@
 Structure module defining the 3D finite element model container, assembly, boundary conditions, and solvers.
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
+import scipy.sparse as sp
+from scipy.sparse.linalg import splu
 
 from .nodes import Node
 from .elements.element import ElementBase
@@ -20,6 +22,10 @@ class Structure:
     Manages nodes, elements, loads, degrees of freedom (6 per node),
     global matrix assembly, boundary condition partitioning, and linear static / modal analysis.
 
+    The global stiffness and mass matrices are sparse (``scipy.sparse`` CSR): element blocks are assembled in
+    coordinate (COO) form, with duplicate entries summed, and converted once to CSR. The static system is solved by a
+    sparse LU factorization (SuperLU).
+
     Attributes
     ----------
     nodes : dict of {int/str: Node}
@@ -28,11 +34,11 @@ class Structure:
         Mapping of element IDs to ElementBase objects.
     loads : list
         List of load objects (PointLoad, ElementLoad, etc.).
-    K : numpy.ndarray or None
+    K : scipy.sparse.csr_matrix or None
         Global stiffness matrix (neq x neq).
     F : numpy.ndarray or None
         Global force vector (neq).
-    M : numpy.ndarray or None
+    M : scipy.sparse.csr_matrix or None
         Global mass matrix (neq x neq).
     disp : numpy.ndarray or None
         Global displacement vector (neq).
@@ -54,9 +60,9 @@ class Structure:
         self.nodes: Dict[Union[int, str], Node] = {}
         self.elements: Dict[Union[int, str], ElementBase] = {}
         self.loads: List = []
-        self.K: Optional[np.ndarray] = None
+        self.K: Optional[sp.csr_matrix] = None
         self.F: Optional[np.ndarray] = None
-        self.M: Optional[np.ndarray] = None
+        self.M: Optional[sp.csr_matrix] = None
         self.disp: Optional[np.ndarray] = None
         self.reactions: Optional[np.ndarray] = None
         self.modal_results: Optional[dict] = None
@@ -88,28 +94,64 @@ class Structure:
             dof += 6
         self.neq = dof
 
+    def _assemble_sparse(
+        self,
+        blocks: Iterable[Tuple[np.ndarray, np.ndarray]],
+        diagonal: Iterable[Tuple[int, float]] = (),
+    ) -> sp.csr_matrix:
+        """
+        Assemble a global (neq x neq) matrix from element blocks and diagonal terms.
+
+        Parameters
+        ----------
+        blocks : iterable of (dofs, matrix)
+            ``dofs`` of shape (n,) and ``matrix`` of shape (n, n), or a group of elements of one type at once:
+            ``dofs`` of shape (N, n) and ``matrix`` of shape (N, n, n).
+        diagonal : iterable of (dof, value)
+            Terms added on the diagonal (support springs, nodal masses).
+        """
+        rows, cols, vals = [], [], []
+        for dofs, mat in blocks:
+            d = np.asarray(dofs, dtype=np.int64)
+            m = np.asarray(mat, dtype=float)
+            if d.ndim == 1:
+                d, m = d[None], m[None]
+            n = d.shape[1]
+            rows.append(np.repeat(d, n, axis=1).ravel())
+            cols.append(np.tile(d, (1, n)).ravel())
+            vals.append(m.reshape(-1))
+        diag = list(diagonal)
+        if diag:
+            dd = np.array([i for i, _ in diag], dtype=np.int64)
+            rows.append(dd)
+            cols.append(dd)
+            vals.append(np.array([v for _, v in diag], dtype=float))
+        if not rows:
+            return sp.csr_matrix((self.neq, self.neq), dtype=float)
+        coo = sp.coo_matrix(
+            (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(self.neq, self.neq)
+        )
+        return coo.tocsr()  # duplicate entries are summed
+
+    def _element_dofs(self, el) -> List[int]:
+        return el.node_i.dofs + el.node_j.dofs
+
     def assemble_stiffness(self):
         """
-        Assemble the global stiffness matrix K (neq x neq) from all elements.
+        Assemble the global stiffness matrix K (neq x neq, sparse CSR) from all elements and support springs.
         """
         if self.neq == 0:
             self.number_dofs()
 
-        self.K = np.zeros((self.neq, self.neq), dtype=float)
-        for el in self.elements.values():
-            k_g = el.global_stiffness()
-            dofs = el.node_i.dofs + el.node_j.dofs
-            for i, ii in enumerate(dofs):
-                for j, jj in enumerate(dofs):
-                    self.K[ii, jj] += k_g[i, j]
-
-        # Add support spring stiffness contributions to diagonal
-        for node in self.nodes.values():
-            if hasattr(node, "springs") and any(node.springs):
-                for i, k_val in enumerate(node.springs):
-                    if k_val > 0.0:
-                        dof = node.dofs[i]
-                        self.K[dof, dof] += float(k_val)
+        blocks = ((self._element_dofs(el), el.global_stiffness()) for el in self.elements.values())
+        springs = [
+            (node.dofs[i], float(k_val))
+            for node in self.nodes.values()
+            if hasattr(node, "springs") and any(node.springs)
+            for i, k_val in enumerate(node.springs)
+            if k_val > 0.0
+        ]
+        self.K = self._assemble_sparse(blocks, springs)
 
     def assemble_loads(self):
         """
@@ -152,10 +194,15 @@ class Structure:
         if self.neq == 0:
             self.number_dofs()
 
+        # Elements connected to each node, in element order (one pass over the elements)
+        connected_to: Dict[int, List[ElementBase]] = {}
+        for el in self.elements.values():
+            connected_to.setdefault(id(el.node_i), []).append(el)
+            if el.node_j is not el.node_i:
+                connected_to.setdefault(id(el.node_j), []).append(el)
+
         for node in self.nodes.values():
-            connected = [
-                el for el in self.elements.values() if node in (el.node_i, el.node_j)
-            ]
+            connected = connected_to.get(id(node), [])
             if not connected:
                 continue
 
@@ -231,29 +278,37 @@ class Structure:
         self.assemble_loads()
         self.apply_boundary_conditions()
 
-        # Partition system: K_ff * u_f = F_f
-        K_ff = self.K[np.ix_(self.free_dofs, self.free_dofs)]
-        F_f = self.F[self.free_dofs]
+        # Partition system: K_ff * u_f = F_f, solved by sparse LU (SuperLU)
+        free = np.asarray(self.free_dofs, dtype=np.int64)
+        fixed = np.asarray(self.fixed_dofs, dtype=np.int64)
+        F_f = self.F[free]
 
         self.disp = np.zeros(self.neq, dtype=float)
-        if len(self.free_dofs) > 0:
+        if len(free) > 0:
+            K_ff = self.K[free][:, free].tocsc()
             try:
-                self.disp[self.free_dofs] = np.linalg.solve(K_ff, F_f)
-            except np.linalg.LinAlgError as err:
+                lu = splu(K_ff)
+            except RuntimeError as err:  # SuperLU: "Factor is exactly singular"
                 raise np.linalg.LinAlgError(
                     f"Stiffness matrix is singular or ill-conditioned: {err}. "
                     "Check for unconstrained DOFs or rigid body mechanisms."
                 ) from err
+            u_f = lu.solve(F_f)
+            if not np.all(np.isfinite(u_f)):
+                raise np.linalg.LinAlgError(
+                    "Stiffness matrix is singular or ill-conditioned: the solution is not finite. "
+                    "Check for unconstrained DOFs or rigid body mechanisms."
+                )
+            self.disp[free] = u_f
 
         # Compute support reactions at fixed DOFs:
         # R_c = K_cf * u_f + K_cc * u_c - F_c
         self.reactions = np.zeros(self.neq, dtype=float)
-        if self.fixed_dofs:
-            if len(self.free_dofs) > 0:
-                self.reactions[self.fixed_dofs] = (
-                    self.K[np.ix_(self.fixed_dofs, self.free_dofs)]
-                    @ self.disp[self.free_dofs]
-                    - self.F[self.fixed_dofs]
+        if len(fixed):
+            if len(free) > 0:
+                self.reactions[fixed] = (
+                    self.K[fixed][:, free] @ self.disp[free]
+                    - self.F[fixed]
                 )
             else:
                 self.reactions[self.fixed_dofs] = -self.F[self.fixed_dofs]
@@ -284,28 +339,24 @@ class Structure:
         if self.neq == 0:
             self.number_dofs()
 
-        self.M = np.zeros((self.neq, self.neq), dtype=float)
         self._mass_lumped = lumped
         self._mass_rotational = include_rotational_inertia
 
         # Element mass contributions
-        for el in self.elements.values():
-            m_g = el.mass_matrix(lumped=lumped, include_rotational_inertia=include_rotational_inertia)
-            dofs = el.node_i.dofs + el.node_j.dofs
-            for i, ii in enumerate(dofs):
-                for j, jj in enumerate(dofs):
-                    self.M[ii, jj] += m_g[i, j]
-
+        blocks = (
+            (self._element_dofs(el), el.mass_matrix(lumped=lumped, include_rotational_inertia=include_rotational_inertia))
+            for el in self.elements.values()
+        )
         # Nodal lumped masses and inertias
+        nodal = []
         for node in self.nodes.values():
             for i in range(3):
                 if node.mass[i] > 0.0:
-                    dof = node.dofs[i]
-                    self.M[dof, dof] += node.mass[i]
+                    nodal.append((node.dofs[i], float(node.mass[i])))
             for i in range(3):
                 if node.inertia[i] > 0.0:
-                    dof = node.dofs[3 + i]
-                    self.M[dof, dof] += node.inertia[i]
+                    nodal.append((node.dofs[3 + i], float(node.inertia[i])))
+        self.M = self._assemble_sparse(blocks, nodal)
 
     def get_reduced_matrices(
         self,
@@ -313,7 +364,7 @@ class Structure:
         include_rotational_inertia: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Return (K_ff, M_ff) reduced to free degrees of freedom.
+        Return (K_ff, M_ff) reduced to the free degrees of freedom, as sparse CSR matrices.
         """
         if not self.free_dofs:
             self.apply_boundary_conditions()
@@ -329,8 +380,9 @@ class Structure:
         elif self.M is None:
             self.assemble_mass_matrix(lumped=False, include_rotational_inertia=include_rotational_inertia)
 
-        K_ff = self.K[np.ix_(self.free_dofs, self.free_dofs)]
-        M_ff = self.M[np.ix_(self.free_dofs, self.free_dofs)]
+        free = np.asarray(self.free_dofs, dtype=np.int64)
+        K_ff = self.K[free][:, free].tocsr()
+        M_ff = self.M[free][:, free].tocsr()
         return K_ff, M_ff
 
     def modal_analysis(

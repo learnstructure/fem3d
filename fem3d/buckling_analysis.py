@@ -4,6 +4,9 @@ Buckling analysis module for 3D finite element frame and truss structures.
 Solves the generalized eigenvalue problem:
     K_ff * phi = lambda * Kg_ff * phi
 where Kg is the 3D geometric stiffness matrix assembled with compression positive.
+
+K and Kg are assembled as sparse matrices; the reduced eigenproblem is solved densely (scipy.linalg.eig), which
+suits the frame and truss models this module serves.
 """
 
 from typing import Tuple
@@ -14,13 +17,13 @@ from .elements.frame import FrameElement
 from .elements.truss import TrussElement
 
 
-def assemble_geometric_stiffness(structure) -> np.ndarray:
+def assemble_geometric_stiffness(structure):
     """
-    Assemble the global 3D geometric stiffness matrix Kg (neq x neq).
+    Assemble the global 3D geometric stiffness matrix Kg (neq x neq, sparse CSR).
 
     Axial force is taken positive in compression.
     """
-    Kg = np.zeros((structure.neq, structure.neq), dtype=float)
+    blocks = []
     for el in structure.elements.values():
         if not isinstance(el, (FrameElement, TrussElement)):
             continue
@@ -30,13 +33,9 @@ def assemble_geometric_stiffness(structure) -> np.ndarray:
         if abs(P) < 1e-12:
             continue
 
-        Kg_el = el.geometric_stiffness(P)
-        dofs = el.node_i.dofs + el.node_j.dofs
-        for i, ii in enumerate(dofs):
-            for j, jj in enumerate(dofs):
-                Kg[ii, jj] += Kg_el[i, j]
+        blocks.append((el.node_i.dofs + el.node_j.dofs, el.geometric_stiffness(P)))
 
-    return Kg
+    return structure._assemble_sparse(blocks)
 
 
 def buckling_analysis(structure, num_modes: int = 1) -> Tuple[np.ndarray, np.ndarray]:
@@ -66,11 +65,11 @@ def buckling_analysis(structure, num_modes: int = 1) -> Tuple[np.ndarray, np.nda
     if structure.free_dofs is None:
         structure.apply_boundary_conditions()
 
-    free = structure.free_dofs
-    K_ff = structure.K[np.ix_(free, free)]
+    free = np.asarray(structure.free_dofs, dtype=np.int64)
+    K_ff = structure.K[free][:, free].toarray()
 
     Kg = assemble_geometric_stiffness(structure)
-    Kg_ff = Kg[np.ix_(free, free)]
+    Kg_ff = Kg[free][:, free].toarray()
 
     # Solve generalized eigenvalue problem: K_ff * phi = lambda * Kg_ff * phi
     # Alternatively: inv(K_ff) * Kg_ff * phi = (1/lambda) * phi

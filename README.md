@@ -37,6 +37,7 @@
 - **Arbitrary 3D Member Orientation** — Automatic local axes computation from member geometry. Supports user-specified roll angle $\beta$ (degrees) or web reference vector.
 - **End Releases** — Optional moment/torsion/shear releases at either end of a frame element (e.g. pinned connections).
 - **Nodal & Element Loads** — Concentrated 3D nodal loads; uniform and partial distributed loads on elements with exact fixed-end force/moment calculation; element point loads.
+- **Sparse Assembly and Solution** — Global stiffness and mass matrices in `scipy.sparse` CSR form, static solution by sparse LU; large models use structdyn's sparse eigensolver.
 - **Modal Analysis** — Generalized eigenvalue solver for natural frequencies and mode shapes.
 - **Linear Elastic Buckling Analysis** — Geometric stiffness matrix $K_g$ with eigenvalue solver.
 - **Post-Processing** — pandas DataFrames for displacements, reactions, and internal forces. Textbook-style text report generator.
