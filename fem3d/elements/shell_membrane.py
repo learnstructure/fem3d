@@ -49,9 +49,11 @@ GAUSS_POINTS_2X2 = np.array(
 )
 #: Natural coordinates of the corner nodes 1 to 4.
 CORNER_POINTS = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
-#: Penalty factor of the drilling rotation, k0 = factor * D33 (Wilson Eq. 9.14).
+#: Penalty factor of the drilling rotation: k0 = 0.025 D33 (Wilson Eq. 9.14).
 DRILLING_PENALTY_FACTOR = 0.025
-#: Penalty factor of the alternating-rotation mode, times D33 (Cook et al. §3.10; same value as Wilson's k0).
+#: Penalty factor of the alternating-rotation mode (Cook et al. §3.10 give the penalty, not its value). The value is
+#: Wilson's k0 = 0.025 D33 (Eq. 9.14). Results are insensitive to it: scaling it by 0.1 or 10 leaves the patch test
+#: and pure bending exact (tests/test_shell_membrane.py; changes of the cantilevers in SHELL_PLAN.md, M3).
 ROTATION_HOURGLASS_FACTOR = 0.025
 
 # Sides 5 to 8 (Wilson Fig. 9.1) as (J, K) corner indices.
@@ -179,6 +181,34 @@ def _point_matrices(xy: np.ndarray, r: float, s: float, Pu, Pv, t):
     return B, rot, detJ, dN
 
 
+def _rotation_hourglass(xy: np.ndarray, dN0: np.ndarray) -> np.ndarray:
+    """Weights g (N, 4) of the alternating-rotation penalty, g @ theta = (theta1 - theta2 + theta3 - theta4) / 4
+    orthogonalized against linear fields: g @ (a + b x + c y) = 0 at the corners of any quadrilateral.
+
+    With h = (1, -1, 1, -1) and dN0 the bilinear derivatives at the center (sum dN0_x = 0, dN0_x @ x = 1,
+    dN0_x @ y = 0, and likewise for y): g = (h - (h @ x) dN0_x - (h @ y) dN0_y) / 4.
+    """
+    hx = xy[:, :, 0] @ _ALTERNATING
+    hy = xy[:, :, 1] @ _ALTERNATING
+    return 0.25 * (_ALTERNATING[None] - hx[:, None] * dN0[:, 0] - hy[:, None] * dN0[:, 1])
+
+
+def membrane_penalty_vectors(xy) -> tuple[np.ndarray, np.ndarray]:
+    """Rows of the two penalty terms on the 12 nodal DOFs, before condensation of the incompatible modes.
+
+    Returns ``drilling`` (N, 12): the continuum rotation at the element center minus the bilinear average of the
+    nodal rotations (Wilson Eq. 9.12; its incompatible-mode part is omitted here), and ``hourglass`` (N, 12): the
+    alternating-rotation function of ``_rotation_hourglass`` on the rotation DOFs. The penalty energies are
+    0.5 * factor * D33 * t * A * (row @ u)^2.
+    """
+    xy = _as_quads(xy)
+    Pu, Pv, t = _side_vectors(xy)
+    _, rot0, _, dN0 = _point_matrices(xy, 0.0, 0.0, Pu, Pv, t)
+    hourglass = np.zeros((xy.shape[0], 12))
+    hourglass[:, 2::3] = _rotation_hourglass(xy, dN0)
+    return rot0[:, :12], hourglass
+
+
 def _membrane_matrices(xy, D):
     """Condensed stiffness per unit thickness (N, 12, 12), condensed strain matrices at the Gauss points
     (N, 4, 3, 12), and det J at the Gauss points (N, 4). The thickness factors out of the condensation."""
@@ -201,11 +231,8 @@ def _membrane_matrices(xy, D):
     G = D[:, 2, 2] * area
     K += (DRILLING_PENALTY_FACTOR * G)[:, None, None] * np.einsum("ni,nj->nij", rot0, rot0)
     # alternating rotations, orthogonal to every linear rotation field (Cook et al. §3.10)
-    hx = xy[:, :, 0] @ _ALTERNATING
-    hy = xy[:, :, 1] @ _ALTERNATING
-    gamma = 0.25 * (_ALTERNATING[None] - hx[:, None] * dN0[:, 0] - hy[:, None] * dN0[:, 1])
     hourglass = np.zeros((n, 16))
-    hourglass[:, 2:12:3] = gamma
+    hourglass[:, 2:12:3] = _rotation_hourglass(xy, dN0)
     K += (ROTATION_HOURGLASS_FACTOR * G)[:, None, None] * np.einsum("ni,nj->nij", hourglass, hourglass)
 
     # static condensation of the incompatible modes: alpha = -Kii^-1 Kic u

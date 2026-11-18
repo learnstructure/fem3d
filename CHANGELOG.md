@@ -13,8 +13,10 @@ All notable changes to `fem3d` are recorded in this file. The format follows
   Ibrahimbegovic and Frey (1992) and a penalty on the alternating-rotation mode (Cook et al. 2002, §3.10). The
   reasons for the two additions and the sign of Wilson Eq. 9.11 are recorded in SHELL_PLAN.md. Not yet used by
   `Structure` (M5). Tests: `tests/test_shell_membrane.py` (rank and rigid modes of one element, invariance, the
-  patch tests of CSI Problem 2-001, exact pure bending, and convergence to the hand calculations of Problems 2-002
-  and 2-003).
+  patch tests of CSI Problem 2-001, exact pure bending, convergence to the hand calculations of Problems 2-002
+  and 2-003, three zero eigenvalues of single elements and of a free 2x2 mesh, the penalty rows
+  (`membrane_penalty_vectors`) vanishing for rigid motion, constant strain, and linear rotation fields, and the
+  sensitivity of the results to the two penalty factors, recorded in SHELL_PLAN.md).
 - Sparse assembly and solution (SHELL_PLAN.md, M2): `Structure.K` and `Structure.M` are `scipy.sparse` CSR
   matrices, assembled from element blocks in COO form (`Structure._assemble_sparse`, which also takes vectorized
   blocks of N elements for the shell elements to come). The static system is solved by sparse LU (SuperLU);

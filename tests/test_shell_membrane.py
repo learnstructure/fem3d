@@ -330,9 +330,11 @@ def test_2002_axial_extension_is_exact_on_every_mesh(mesh):
 
 
 def test_2002_in_plane_moment_is_exact_on_rectangles():
+    """Exact to round-off: the condition number of the reduced K grows to 8e7 on the 24x4 mesh (cond * eps = 2e-8),
+    so the tolerance is 1e-7."""
     for n_depth, n_long in ((1, 6), (2, 12), (4, 24)):
         x = np.linspace(0, L_2002, n_long + 1)
-        assert cantilever_2002(x, x, n_depth)["moment"] == pytest.approx(MOMENT_2002, rel=1e-9)
+        assert cantilever_2002(x, x, n_depth)["moment"] == pytest.approx(MOMENT_2002, rel=1e-7)
 
 
 def test_2002_in_plane_shear_converges_on_rectangles():
@@ -392,3 +394,90 @@ def test_2003_curved_cantilever_converges_to_hand_calculation():
     assert curved_cantilever_2003(90, 1) == pytest.approx(hand, rel=0.005)
     assert curved_cantilever_2003(90, 3) == pytest.approx(hand, rel=0.005)
     assert abs(curved_cantilever_2003(30, 1) / hand - 1) < abs(curved_cantilever_2003(6, 1) / hand - 1)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# penalty factors: rank of meshes, what the penalties act on, and sensitivity to their values
+# --------------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("shape", ["rectangle", "general"])
+def test_single_element_has_exactly_three_zero_eigenvalues(shape):
+    K = sm.membrane_stiffness(np.array(SHAPES[shape], float), sm.plane_stress_matrix(1.0, 0.25), 1.0)[0]
+    assert zero_eigenvalues(K)[0] == 3
+
+
+@pytest.mark.parametrize("distortion", [0.0, 0.3], ids=["rectangles", "distorted"])
+def test_free_two_by_two_mesh_has_exactly_three_zero_eigenvalues(distortion):
+    """No support, every rotation free: only the three rigid modes of the mesh (the alternating-rotation mode of a
+    rectangular mesh is suppressed)."""
+    x, y = np.meshgrid([0.0, 1.0, 2.0], [0.0, 0.5, 1.0])
+    nodes = np.column_stack([x.ravel(), y.ravel()])
+    nodes[4] += distortion * np.array([1.0, 0.4])  # move the center node
+    quads = [[0, 1, 4, 3], [1, 2, 5, 4], [3, 4, 7, 6], [4, 5, 8, 7]]
+    K = assemble(nodes, quads, sm.plane_stress_matrix(1.0, 0.25), 1.0)
+    assert zero_eigenvalues(K)[0] == 3
+
+
+def test_penalties_vanish_for_rigid_motion_constant_strain_and_linear_rotation():
+    """On a distorted quadrilateral, both penalty rows are zero for the rigid modes and for constant strain (nodal
+    rotations equal to the rotation of the field); the alternating-rotation row is also zero for any linear rotation
+    field theta = a + b x + c y. The rows are the ones built into the stiffness."""
+    xy = np.array(SHAPES["general"], float)
+    x, y = xy.T
+    drilling, hourglass = (row[0] for row in sm.membrane_penalty_vectors(xy))
+    fields = list(rigid_modes(xy))
+    for ux, uy in ((x, 0 * x), (0 * x, y), (y / 2, x / 2)):  # constant eps_x, eps_y, gamma_xy; rotation zero
+        u = np.zeros(12)
+        u[0::3], u[1::3] = ux, uy
+        fields.append(u)
+    for u in fields:
+        assert abs(drilling @ u) < 1e-12
+        assert abs(hourglass @ u) < 1e-12
+    for a, b, c in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (0.3, -2.0, 1.7)):
+        u = np.zeros(12)
+        u[2::3] = a + b * x + c * y
+        assert abs(hourglass @ u) < 1e-12
+    alternating = np.zeros(12)
+    alternating[2::3] = [1.0, -1.0, 1.0, -1.0]
+    assert abs(hourglass @ alternating) > 0.1
+    # the hourglass row is the term the stiffness carries: K(factor) - K(0) = factor * G * t * A * h h^T
+    D = sm.plane_stress_matrix(1.0, 0.25)
+    area = 0.5 * abs((x[2] - x[0]) * (y[3] - y[1]) - (x[3] - x[1]) * (y[2] - y[0]))
+    K = sm.membrane_stiffness(xy, D, 1.0)[0]
+    factor = sm.ROTATION_HOURGLASS_FACTOR
+    try:
+        sm.ROTATION_HOURGLASS_FACTOR = 0.0
+        K0 = sm.membrane_stiffness(xy, D, 1.0)[0]
+    finally:
+        sm.ROTATION_HOURGLASS_FACTOR = factor
+    assert np.allclose(K - K0, factor * D[0, 2, 2] * area * np.outer(hourglass, hourglass), atol=1e-14)
+
+
+def _refined_results():
+    out = {}
+    for name, mesh, n_depth in (
+        ("2-002 F", MESH_F, 1),
+        ("2-002 G", (subdivide(MESH_B[0], 10), subdivide(MESH_B[1], 10)), 2),
+    ):
+        result = cantilever_2002(*mesh, n_depth)
+        out[name + " shear"], out[name + " moment"] = result["shear"], result["moment"]
+    out["2-003 90x1"] = curved_cantilever_2003(90, 1)
+    out["2-003 90x3"] = curved_cantilever_2003(90, 3)
+    return out
+
+
+@pytest.mark.parametrize("constant", ["ROTATION_HOURGLASS_FACTOR", "DRILLING_PENALTY_FACTOR"])
+@pytest.mark.parametrize("scale", [0.1, 10.0])
+def test_results_are_insensitive_to_the_penalty_factors(monkeypatch, constant, scale):
+    """Scaling a penalty factor by 0.1 or 10 keeps the patch tests (Problem 2-001) and pure bending exact, and moves
+    the refined meshes of Problems 2-002 and 2-003 by less than 1 percent. The coarse distorted 6x1 meshes (Models B
+    and C) are more sensitive; their changes are recorded in SHELL_PLAN.md, M3."""
+    reference = _refined_results()
+    monkeypatch.setattr(sm, constant, getattr(sm, constant) * scale)
+    test_patch_test_with_prescribed_edge_displacements(0.0)
+    test_patch_test_with_prescribed_edge_displacements(2.0e-3)
+    test_patch_test_with_edge_tractions_and_minimal_supports()
+    test_pure_bending_of_rectangles_is_exact(0.25)
+    test_2002_in_plane_moment_is_exact_on_rectangles()
+    scaled = _refined_results()
+    for key, value in reference.items():
+        assert scaled[key] == pytest.approx(value, rel=0.01), key

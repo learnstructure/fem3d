@@ -126,6 +126,29 @@ Findings that changed the formulation (all checked on page images):
 - The one-element test has 3 zero eigenvalues for the membrane alone (6 in the full shell, M5).
 - The twisted cantilever (2-004) involves bending even under its in-plane load, so it moves to M5.
 
+Sensitivity to the penalty factors (accepted 17 November 2026: both stay at 0.025 D33, the hourglass factor citing
+Wilson Eq. 9.14 and Cook et al. §3.10). Each factor was scaled by 0.1 and 10 with the other at 0.025
+(`test_results_are_insensitive_to_the_penalty_factors`):
+
+- The patch tests of 2-001 (prescribed edges, with and without a rigid rotation, and edge tractions) and pure bending
+  of rectangles stay exact to round-off. Rectangular meshes (2-002 Model A) do not change at all.
+- Change of the tip displacements (percent):
+
+| Case | Hourglass x0.1 | Hourglass x10 | Drilling x0.1 | Drilling x10 |
+|---|---|---|---|---|
+| 2-002 Model B (6x1 trapezoids), shear / moment | +3.7 / +3.5 | -13.3 / -12.3 | +0.4 / +0.4 | -1.1 / -1.3 |
+| 2-002 Model C (6x1 parallelograms, trapezoidal ends), shear / moment | +0.8 / +0.7 | -2.9 / -2.3 | +0.9 / +0.7 | -2.2 / -1.6 |
+| 2-002 Model F, shear / moment | +0.14 / +0.03 | -0.86 / -0.05 | +0.01 / 0.00 | -0.01 / -0.01 |
+| 2-002 Model G (60x2), shear / moment | 0.00 / 0.00 | -0.03 / -0.03 | +0.13 / +0.14 | -0.82 / -0.84 |
+| 2-003, 6x1 | +0.03 | -0.31 | +0.10 | -0.09 |
+| 2-003, 90x1 / 90x3 | +0.02 / 0.00 | -0.01 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+
+  The factors matter only for coarse, strongly distorted elements (Model B has 45-degree trapezoids with aspect ratio
+  near 5); every refined mesh moves by less than 1 percent, which the test asserts.
+- Also tested: a single rectangle, a single distorted quadrilateral, and a free 2x2 mesh (rectangular and distorted)
+  each have exactly three zero eigenvalues; on a distorted quadrilateral both penalty rows vanish for the rigid modes
+  and constant strain, and the hourglass row also for any linear rotation field (`membrane_penalty_vectors`).
+
 Results (pass/fail against closed forms; SAP2000 values from the CSI manuals for information only):
 
 | Case | This element | SAP2000 | Closed form |
