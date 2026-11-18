@@ -161,13 +161,52 @@ Results (pass/fail against closed forms; SAP2000 values from the CSI manuals for
 | 2-003 in-plane, 90x1 / 90x3 | 0.08858 / 0.08851 | 0.0845 / 0.0884 | 0.08860 in |
 | Simple beam, unit end couples (Ibrahimbegovic and Frey §6.2) | 1.5000, 0.6000 | - | 1.5, 0.6 |
 
-## M4. MITC4 plate bending `[ ]`
+## M4. MITC4 plate bending `[x]` 17 November 2026
+
+Done: `fem3d/elements/shell_plate.py` (vectorized kernel in the element plane: rigidities, stiffness, curvature and
+assumed shear strain matrices, resultants M11, M22, M12, V13, V23 at the Gauss points, consistent pressure loads);
+tests: `fem3d/tests/test_shell_plate.py`. Not yet reachable from `Structure` (M5).
 
 - Dvorkin and Bathe (1984); Bathe §5.4.2. Assumed transverse shear strains at the tying points, shear correction 5/6.
   `plate_theory="thin"` raises a clear error until DKQ is implemented.
 - Tests: bending patch test (2-001); out-of-plane cantilever cases (2-002 to 2-004); rectangular plate under uniform
   and point load (2-005) against Navier thin-plate solutions (Timoshenko Ch. 5 or Reddy Ch. 6) and first-order shear
   deformation solutions (Reddy Ch. 10); no shear locking as the thickness decreases.
+
+Notes (formulas checked on the page images of Bathe pp. 420-429, Reddy pp. 367-370, Timoshenko pp. 202 and 206, and
+CSI Analysis Reference Manual §10.18):
+
+- Kinematics and signs follow Bathe Eqs. 5.88 and 5.99 (beta_x = -theta_y, beta_y = theta_x). The resultants
+  M = C_b kappa and V = C_s gamma equal the CSI definitions (M = -integral of x3 sigma, V = integral of sigma_13).
+- The MITC4 shear interpolation is coded in covariant form, gamma = J^-1 (gamma_r, gamma_s). Tests compare it with
+  Bathe's explicit Eq. 5.101 (2 x 2 element) and Eqs. 5.102 to 5.105 (general quadrilateral), coded independently in
+  the test; both agree to round-off.
+- The thin-plate refusal (`plate_theory="thin"`) belongs to the adapter that reads `ShellSection` (M5); the kernel is
+  the thick-plate formulation only. CSI uses the bending thickness thb for bending and transverse shear
+  (§10.3, "Section Thickness"); M5 passes `ShellSection.effective_bending_thickness`.
+- The out-of-plane twist case of 2-002 (load case 4) and the out-of-plane load of 2-003 are not closed-form tests:
+  their hand calculations use the beam torsion constant 0.229 b d^3, while shell theory gives b d^3 / 3 (CSI's own
+  discussion of both problems). They move to M5 and M6 as comparisons, together with 2-004.
+- The Navier implementation is checked against Reddy Table 10.2.1 (0.4259 and 0.4111 for b/h = 10 and 20, 0.4062 for
+  classical plate theory).
+
+Results (pass/fail against closed forms; SAP2000 thick-plate values from the CSI manual for information only):
+
+| Case | This element | SAP2000 | Closed form |
+|---|---|---|---|
+| 2-001 bending patch test (t = 0.001 and 0.05 in) | exact, V = 0 | exact | M = 1.111E-07, 1.111E-07, 3.333E-08 |
+| 2-005 square, simple, uniform: quarter 4x4 / 16x16 | 4.041 / 4.061 | 4.03 / 4.06 | 4.062 (Navier) |
+| 2-005 square, simple, point: 4x4 / 16x16 | 11.54 / 11.59 | 11.61 / 11.61 | 11.60 (Navier) |
+| 2-005 square, clamped, uniform: 4x4 / 16x16 | 1.251 / 1.264 | 1.25 / 1.27 | 1.26 (Table 35) |
+| 2-005 square, clamped, point: 4x4 / 16x16 | 5.404 / 5.596 | 5.38 / 5.61 | 5.60 (Table 37) |
+| 2-005 2x10, simple, uniform: 4x20 / 8x40 / 16x80 | 12.65 / 12.89 / 12.95 | - | 12.97 (Navier) |
+| 2-005 2x10, clamped, point: 4x20 / 8x40 / 16x80 | 6.89 / 7.15 / 7.22 | - | 7.25 (Table 37) |
+| Square, simple, uniform, 8x8 quarter, a/h = 10 to 100,000 | 0.9987 to 0.9987 of FSDT | - | Reddy Eq. 10.2.14 |
+| 2-002 out-of-plane tip load: 6x1 / 24x4 / 48x8 | 0.4288 / 0.4310 / 0.4315 | 0.4321 (6x1) | 0.4321 |
+| 2-002 out-of-plane tip moment (rad) | 0.0360 | 0.0360 | 0.036 |
+
+The 2x10 meshes of the Problem (4x4 and 16x16 quarters) have elements of aspect ratio 5; the tests use square
+elements and show convergence. With the Problem's 16x16 mesh the clamped point load gives 7.12 (-1.8 percent).
 
 ## M5. Flat shell, loads, mass, and results `[ ]`
 

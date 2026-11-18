@@ -7,6 +7,14 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 ## [Unreleased]
 
 ### Added
+- `fem3d.elements.shell_plate` (SHELL_PLAN.md, M4): the MITC4 plate bending element of Dvorkin and Bathe (1984), as
+  in Bathe (2014) §5.4.2, vectorized, in the element plane: isotropic rigidities (shear correction 5/6), stiffness,
+  curvature and assumed shear strain matrices, the CSI resultants M11, M22, M12, V13, V23 at the Gauss points, and
+  consistent pressure loads. Not yet used by `Structure` (M5). Tests: `tests/test_shell_plate.py` (three rigid modes
+  of one element, the shear interpolation against Bathe Eqs. 5.101 to 5.105, invariance, the bending patch test of
+  CSI Problem 2-001, rectangular plates of Problem 2-005 against Navier series and Timoshenko's tables, thick plates
+  against the first-order shear deformation Navier solution of Reddy, no shear locking up to span/thickness 100,000,
+  and the out-of-plane cases of Problem 2-002).
 - `fem3d.elements.shell_membrane` (SHELL_PLAN.md, M3): a vectorized quadrilateral membrane with drilling rotations,
   in the element plane (stiffness, strain matrices, and membrane forces at the 2x2 Gauss points). Formulation:
   Ibrahimbegovic, Taylor and Wilson (1990) as in Wilson (2002) Ch. 9, with the tangential incompatible modes of
