@@ -96,6 +96,35 @@ class PointLoad:
         return f"PointLoad(node={self.node.id}, F=({self.fx}, {self.fy}, {self.fz}), M=({self.mx}, {self.my}, {self.mz}))"
 
 
+class ShellLoad:
+    """
+    Uniform load per unit area on a shell element (struct_core ``ShellLoad``; CSI Analysis Reference Manual §10.14).
+
+    Attributes
+    ----------
+    shell : ShellElement
+        Loaded shell element (the attribute is ``shell``, not ``element``, so that code written for frame member
+        loads never takes it for one).
+    pressure : float
+        Force per unit area of the element, signed along ``direction``.
+    direction : {"local_3", "x", "y", "z"}
+        The element's local axis 3, or a global axis. Gravity is ``direction="z"`` with a negative pressure.
+    is_self_weight : bool
+        Load generated from the element's self-weight (not to be applied twice).
+    """
+
+    def __init__(self, shell, pressure: float, direction: str = "local_3", is_self_weight: bool = False):
+        if direction not in ("local_3", "x", "y", "z"):
+            raise ValueError(f"ShellLoad direction must be 'local_3', 'x', 'y', or 'z', got {direction!r}")
+        self.shell = shell
+        self.pressure = float(pressure)
+        self.direction = direction
+        self.is_self_weight = bool(is_self_weight)
+
+    def __repr__(self) -> str:
+        return f"ShellLoad(shell={self.shell.id!r}, pressure={self.pressure}, direction={self.direction!r})"
+
+
 class ElementLoad:
     """
     Base class for loads acting along the length of a 3D element.

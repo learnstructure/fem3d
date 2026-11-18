@@ -34,6 +34,7 @@
 - **3D Frame / Beam-Column Element (12 DOF)** — Euler-Bernoulli formulation with axial, St. Venant torsion, and biaxial bending $(EI_y, EI_z)$. Optional Timoshenko shear deformation.
 - **3D Space Truss Element** — Pin-jointed bar members. Axial stiffness only.
 - **3D Spring Element** — Translational and rotational springs along 3D axes.
+- **4-Node Flat Shell Element** — Membrane with drilling rotations plus MITC4 plate bending (thick plates, no shear locking), six DOFs per node; local axes, stress resultants, and signs as in SAP2000 (CSI §10). Uniform loads, self-weight, lumped or consistent mass, results at Gauss points, corners, and nodes.
 - **Arbitrary 3D Member Orientation** — Automatic local axes computation from member geometry. Supports user-specified roll angle $\beta$ (degrees) or web reference vector.
 - **End Releases** — Optional moment/torsion/shear releases at either end of a frame element (e.g. pinned connections).
 - **Nodal & Element Loads** — Concentrated 3D nodal loads; uniform and partial distributed loads on elements with exact fixed-end force/moment calculation; element point loads.
@@ -271,6 +272,17 @@ Pure axial stiffness only. Local $2 \times 2$ system expanded to $12 \times 12$ 
 ### 3D Spring Element (`SpringElement`)
 
 Diagonal stiffness in global coordinates: $(k_x, k_y, k_z, k_{rx}, k_{ry}, k_{rz})$. No transformation needed.
+
+### 4-Node Flat Shell Element (`ShellElement`)
+
+Membrane and plate in one flat element with six DOFs per node (`fem3d/SHELL_PLAN.md`):
+
+- **Membrane:** quadrilateral with drilling rotations (Ibrahimbegovic, Taylor and Wilson 1990; Wilson 2002, Ch. 9), with tangential incompatible modes (Ibrahimbegovic and Frey 1992) and a penalty on the alternating-rotation mode (Cook et al. 2002, §3.10). Pure bending of rectangles is exact.
+- **Plate:** MITC4 (Dvorkin and Bathe 1984; Bathe 2014, §5.4.2), shear correction 5/6. Thick-plate (Mindlin) formulation that does not lock as the plate becomes thin; thin-plate (Kirchhoff) sections are refused until DKQ is added.
+- **Geometry:** local axes 1-2-3 from `struct_core.geometry.shell_local_axes` (SAP2000 rules, `axis_angle`, `reference_vector`); warped elements are projected on their mean plane with rigid links (Wilson Eq. 10.2). `behavior` is `"shell"`, `"membrane"`, or `"plate"`; `thickness` (th) gives membrane stiffness, mass, and self-weight, `bending_thickness` (thb) the plate stiffness.
+- **Results:** `Structure.shell_resultants()` gives F11, F22, F12, M11, M22, M12, V13, V23 per unit length in local axes (CSI §10.18 signs: positive moments put the bottom face in tension) at the 2x2 Gauss points and extrapolated to the corners; `result_to_core` adds node averages per plane. Response spectrum analysis returns `combined_shell_resultants`.
+- **Mass:** translations only, rho x th per unit area, lumped as SAP2000 does (CSI §10.11) or consistent.
+- Shells are stored in `Structure.shells` (added with `add_shell`), apart from the two-node elements. Quadrilaterals only; triangles are planned.
 
 ### Auto-Stabilization of Truss-Only Nodes
 
@@ -530,6 +542,14 @@ For a full-span uniform load on an Euler-Bernoulli member they are:
 | $w_1$ (local 1) | $\pm w_1 L / 2$ | none |
 
 Loads are transformed to global DOFs via the element's transformation matrix $T$.
+
+### `ShellLoad`
+
+Uniform load per unit area on a shell element, along its local axis 3 (`direction="local_3"`) or a global axis (`"x"`, `"y"`, `"z"`); the sign of `pressure` gives the sense (gravity: `direction="z"`, negative pressure). Applied as consistent nodal forces.
+
+```python
+s.add_load(ShellLoad(slab, pressure=-5.0, direction="z"))
+```
 
 ### `ElementPointLoad`
 

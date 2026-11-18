@@ -14,7 +14,8 @@ from .sections.section import Section
 from .elements.frame import FrameElement, BeamElement
 from .elements.truss import TrussElement
 from .elements.spring import SpringElement
-from .loads import PointLoad, DistributedLoad, ElementPointLoad
+from .elements.shell import ShellElement
+from .loads import PointLoad, DistributedLoad, ElementPointLoad, ShellLoad
 from .results import Results
 from .buckling_analysis import buckling_analysis
 from .utils.simple_frame import SimpleFrame, SimpleFrame3D
@@ -49,9 +50,11 @@ __all__ = [
     "BeamElement",
     "TrussElement",
     "SpringElement",
+    "ShellElement",
     "PointLoad",
     "DistributedLoad",
     "ElementPointLoad",
+    "ShellLoad",
     "Results",
     "buckling_analysis",
     "SimpleFrame",

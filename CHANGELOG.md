@@ -7,6 +7,22 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 ## [Unreleased]
 
 ### Added
+- Shell elements in `Structure` (SHELL_PLAN.md, M5): `ShellElement` (`fem3d.elements.shell`), a four-node flat shell
+  that combines the membrane (M3) and the MITC4 plate (M4), six DOFs per node, with `behavior` "shell",
+  "membrane", or "plate", membrane and bending thicknesses, and the SAP2000 local axes of
+  `struct_core.geometry.shell_local_axes` (`axis_angle`, `reference_vector`). Warped elements are projected on their
+  mean plane with rigid links (Wilson Eq. 10.2). Shells are kept in `Structure.shells` (`add_shell`), apart from the
+  two-node elements; IDs are unique across both. `ShellLoad` (uniform load along local 3 or a global axis, consistent
+  nodal forces); mass on the translations, lumped as CSI §10.11 or consistent; `Structure.shell_resultants()` (F11
+  ... V23 at the Gauss points and the corners, local axes, CSI §10.18 signs); `combined_shell_resultants` from
+  `response_spectrum_analysis`. The adapter converts shell elements, sections, and loads in both directions, adds the
+  shells' self-weight, reports `shell_results` and node averages per plane (`shell_node_results`), and gives the
+  shells no mass of their own when a mass source lumps it at the nodes. Triangles and thin-plate (Kirchhoff)
+  sections are refused with the reason. Example: `examples/linear/shell_plate.py`. Tests:
+  `tests/test_shell_structure.py` (six rigid modes, flat and warped; the 2-001 patch in an arbitrary plane;
+  invariance under rigid rotation, cyclic renumbering, and axis angle; Scordelis-Lo roof; twisted beam; load totals
+  and self-weight; mass totals and the plate frequency against the closed form; response spectrum),
+  `tests/test_shell_adapter.py`, `tests/test_shell_refusal.py`.
 - `fem3d.elements.shell_plate` (SHELL_PLAN.md, M4): the MITC4 plate bending element of Dvorkin and Bathe (1984), as
   in Bathe (2014) §5.4.2, vectorized, in the element plane: isotropic rigidities (shear correction 5/6), stiffness,
   curvature and assumed shear strain matrices, the CSI resultants M11, M22, M12, V13, V23 at the Gauss points, and
@@ -14,7 +30,9 @@ All notable changes to `fem3d` are recorded in this file. The format follows
   of one element, the shear interpolation against Bathe Eqs. 5.101 to 5.105, invariance, the bending patch test of
   CSI Problem 2-001, rectangular plates of Problem 2-005 against Navier series and Timoshenko's tables, thick plates
   against the first-order shear deformation Navier solution of Reddy, no shear locking up to span/thickness 100,000,
-  and the out-of-plane cases of Problem 2-002).
+  the out-of-plane cases of Problem 2-002, the signs of V13 and M11 on a cantilever strip against CSI §10.18, and the
+  convergence of M11, M22, and V13 at the Gauss points of a simply supported plate against the Navier series and
+  Timoshenko Table 8).
 - `fem3d.elements.shell_membrane` (SHELL_PLAN.md, M3): a vectorized quadrilateral membrane with drilling rotations,
   in the element plane (stiffness, strain matrices, and membrane forces at the 2x2 Gauss points). Formulation:
   Ibrahimbegovic, Taylor and Wilson (1990) as in Wilson (2002) Ch. 9, with the tangential incompatible modes of
@@ -36,7 +54,6 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 - `buckling_analysis.assemble_geometric_stiffness` returns a sparse Kg; the reduced eigenproblem is still
   solved densely.
 - `SHELL_PLAN.md`: the implementation plan of shell elements (ROADMAP §4).
-- `model_from_core` refuses models with shell elements until fem3d analyzes them (SHELL_PLAN.md, M5).
 - `fem3d.loads.bending_shape_functions`: the exact interpolation (deflection and cross-section rotation) of a
   two-node Timoshenko beam, which reduces to the Hermite cubics without shear deformation.
 - `FrameElement.shear_parameters()`: the shear parameters (phi_2, phi_3) used by both the stiffness matrix and the

@@ -6,6 +6,7 @@ from .element import ElementBase
 from .frame import FrameElement, BeamElement
 from .truss import TrussElement
 from .spring import SpringElement
+from .shell import ShellElement
 
 __all__ = [
     "ElementBase",
@@ -13,4 +14,5 @@ __all__ = [
     "BeamElement",
     "TrussElement",
     "SpringElement",
+    "ShellElement",
 ]

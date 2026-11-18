@@ -386,3 +386,104 @@ def test_2002_out_of_plane_load_and_moment():
     assert errors[-1] < 0.002
     for _, rotation in results:
         assert rotation == pytest.approx(6.0 / (1.0e7 * I), rel=0.002)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# stress resultants (signs and values; Gauss-point values, before extrapolation and averaging of M5)
+# --------------------------------------------------------------------------------------------------------------------
+def gauss_point_coordinates(nodes, quads):
+    N = np.array([sp._bilinear(r, s)[0] for r, s in sp.GAUSS_POINTS_2X2])
+    return np.einsum("gk,nkd->ngd", N, nodes[quads])
+
+
+@pytest.mark.parametrize("mesh", [(6, 1), (24, 4)], ids=["6x1", "24x4"])
+def test_cantilever_strip_resultants_fix_the_signs_of_csi_section_10_18(mesh):
+    """Strip of Problem 2-002 (L = 6, b = 0.2, t = 0.1) under a tip load P = +1 along +z (local 3).
+
+    Statics: V13 = +P / b (the free end pulls the positive face toward +3), V23 = 0, and the moment
+    M11 = P (L - x) / b is positive (tension at the bottom, CSI Eqns. 10-8d and 10-10a). The element has constant
+    curvature along x, so each Gauss point carries the moment at the element centroid x_c; equilibrium makes that
+    value exact. nu = 0 makes the strip an exact beam; with nu = 0.3 the clamped root restrains the anticlastic
+    curvature and the free edges carry a Mindlin boundary layer, which are plate effects, not errors.
+    """
+    n_long, n_wide = mesh
+    L, b, P = 6.0, 0.2, 1.0
+    nodes, quads = grid(np.linspace(0, L, n_long + 1), np.linspace(0, b, n_wide + 1))
+    Cb, Cs = isotropic(1.0e7, 0.0, 0.1)
+    K, _ = assemble(nodes, quads, Cb, Cs)
+    root = np.arange(n_wide + 1) * (n_long + 1)
+    tip = root + n_long
+    weights = np.full(n_wide + 1, P / n_wide)
+    weights[[0, -1]] /= 2
+    F = np.zeros(K.shape[0])
+    F[3 * tip] = weights
+    u = solve(K, F, set(3 * root) | set(3 * root + 2))
+    R = sp.plate_resultants(nodes[quads], Cb, Cs, u[element_dofs(quads)])
+    x_c = nodes[quads][:, :, 0].mean(axis=1)
+    scale = P * L / b
+    assert np.allclose(R[:, :, 3], P / b, rtol=0, atol=1e-7 * P / b)
+    assert np.allclose(R[:, :, 4], 0.0, atol=1e-7 * P / b)
+    assert np.allclose(R[:, :, 0], (P * (L - x_c) / b)[:, None], rtol=0, atol=1e-7 * scale)
+    assert np.allclose(R[:, :, 1:3], 0.0, atol=1e-7 * scale)
+    assert np.all(R[:, :, 0] > 0)
+
+
+def navier_resultants(a, x, y, nu, terms=801):
+    """Kirchhoff Navier series of a simply supported a x a plate, D = 1, unit downward load (Timoshenko Ch. 5),
+    in the CSI convention: M11 and M22 positive in sagging, V13 = -dM11/dx - dM12/dy (CSI Eqn. 10-9a).
+    For a simply supported plate the first-order shear deformation moments and shears are the same (Reddy
+    Eqs. 10.2.14 to 10.2.17 give identical values for any thickness)."""
+    m = np.arange(1, terms + 1, 2)[:, None]
+    n = np.arange(1, terms + 1, 2)[None, :]
+    al, be = m * np.pi / a, n * np.pi / a
+    W = 16 / (np.pi**2 * m * n) / (al**2 + be**2) ** 2
+    s = np.sin(al * x) * np.sin(be * y)
+    M11 = ((al**2 + nu * be**2) * W * s).sum()
+    M22 = ((be**2 + nu * al**2) * W * s).sum()
+    V13 = -(al * (al**2 + be**2) * W * np.cos(al * x) * np.sin(be * y)).sum()
+    return M11, M22, V13
+
+
+def test_navier_resultants_reproduce_timoshenko_table_8():
+    """nu = 0.3, b/a = 1: (M_x)max = 0.0479 q a^2 at the center and (Q_x)max = 0.338 q a at the middle of the side.
+    The side value comes from Timoshenko's rapidly converging Eq. (p), gamma = 1/2 - 4/pi^2 sum 1/(m^2 cosh a_m),
+    a_m = m pi / 2; the double Navier series converges slowly on the edge itself."""
+    M11, M22, _ = navier_resultants(1.0, 0.5, 0.5, 0.3)
+    assert M11 == pytest.approx(0.0479, abs=5e-5) and M22 == pytest.approx(M11)
+    gamma = 0.5 - 4 / np.pi**2 * sum(1 / (m**2 * np.cosh(m * np.pi / 2)) for m in range(1, 40, 2))
+    assert gamma == pytest.approx(0.338, abs=5e-4)
+    assert -navier_resultants(1.0, 0.0, 0.5, 0.3, terms=3201)[2] == pytest.approx(gamma, rel=0.001)
+
+
+@pytest.mark.parametrize("span_to_thickness", [100, 20_000])
+def test_simply_supported_plate_resultants_converge_at_the_gauss_points(span_to_thickness):
+    """Square plate (a = 2) under a uniform downward load, quarter meshes 4x4, 8x8, 16x16 (hard simple support).
+    Compared with the Navier series at the Gauss point nearest the plate center (M11, M22) and nearest the middle of
+    the side x = 0 (V13, negative there under a downward load). Moments converge at second order (errors 1.1, 0.27,
+    0.06 percent); the MITC4 transverse shear at first order (9.6, 5.1, 2.6 percent), as Bathe §5.4.2 notes for
+    the shear of this element. Results do not depend on the thickness."""
+    a, nu, q = 2.0, 0.3, 1.0
+    h = a / span_to_thickness
+    Cb, Cs = isotropic(1.0, nu, h)  # moments and shears of the Navier series do not depend on D
+    errors_M, errors_V = [], []
+    for n in (4, 8, 16):
+        nodes, quads = grid(np.linspace(0, a / 2, n + 1), np.linspace(0, a / 2, n + 1))
+        K, F = assemble(nodes, quads, Cb, Cs, pressure=-q)
+        x, y = nodes.T
+        supported = np.isclose(x, 0) | np.isclose(y, 0)
+        fixed = set(3 * np.flatnonzero(supported))
+        fixed |= set(3 * np.flatnonzero(np.isclose(x, 0)) + 1) | set(3 * np.flatnonzero(np.isclose(y, 0)) + 2)
+        fixed |= set(3 * np.flatnonzero(np.isclose(x, a / 2)) + 2) | set(3 * np.flatnonzero(np.isclose(y, a / 2)) + 1)
+        u = solve(K, F, fixed)
+        R = sp.plate_resultants(nodes[quads], Cb, Cs, u[element_dofs(quads)])
+        gp = gauss_point_coordinates(nodes, quads)
+        e, g = np.unravel_index(np.argmin((gp[..., 0] - a / 2) ** 2 + (gp[..., 1] - a / 2) ** 2), gp.shape[:2])
+        M11, M22, _ = navier_resultants(a, *gp[e, g], nu)
+        assert R[e, g, 0] > 0 and R[e, g, 1] > 0
+        errors_M.append(max(abs(R[e, g, 0] / (q * M11) - 1), abs(R[e, g, 1] / (q * M22) - 1)))
+        e, g = np.unravel_index(np.argmin(gp[..., 0] ** 2 + (gp[..., 1] - a / 2) ** 2), gp.shape[:2])
+        V13 = navier_resultants(a, *gp[e, g], nu)[2]
+        assert R[e, g, 3] < 0
+        errors_V.append(abs(R[e, g, 3] / (q * V13) - 1))
+    assert errors_M[-1] < 0.001 and errors_M[1] < errors_M[0] / 3 and errors_M[2] < errors_M[1] / 3
+    assert errors_V[-1] < 0.03 and errors_V[1] < 0.6 * errors_V[0] and errors_V[2] < 0.6 * errors_V[1]

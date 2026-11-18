@@ -208,7 +208,41 @@ Results (pass/fail against closed forms; SAP2000 thick-plate values from the CSI
 The 2x10 meshes of the Problem (4x4 and 16x16 quarters) have elements of aspect ratio 5; the tests use square
 elements and show convergence. With the Problem's 16x16 mesh the clamped point load gives 7.12 (-1.8 percent).
 
-## M5. Flat shell, loads, mass, and results `[ ]`
+Stress resultants (added 18 November 2026; Gauss-point values, before the extrapolation and averaging of M5):
+
+- Signs against CSI §10.18. Strip of 2-002 (L = 6, b = 0.2, t = 0.1) with a tip load P = +1 along +3: at every Gauss
+  point V13 = +P/b, V23 = 0, M22 = M12 = 0, and M11 = P(L - x_c)/b > 0 (tension at the bottom), to round-off on the
+  6x1 and 24x4 meshes. M11 is constant along each element (constant curvature), so a Gauss point carries the moment
+  at the element centroid x_c; equilibrium makes that value exact. The test uses nu = 0, which makes the strip an
+  exact beam. With nu = 0.3 the strip is a plate: the clamped root restrains the anticlastic curvature (M22 up to
+  4.6, V13 from -30 to +28 in the root elements of the 24x4 mesh, against P/b = 5) and the free edges carry the
+  Mindlin shear boundary layer (V13 within 33 percent of P/b beyond x = 1). These are plate effects, not errors.
+- Simply supported square plate (a = 2, nu = 0.3), uniform downward load, quarter meshes, against the Kirchhoff
+  Navier series at the same Gauss points (for a simply supported plate the first-order shear deformation moments and
+  shears are identical; checked with Reddy Eqs. 10.2.14 to 10.2.17). The series reproduce Timoshenko Table 8:
+  0.0479 q a^2 at the center, and 0.338 q a at the middle of the side (Timoshenko Eq. p gives 0.33766).
+
+| Quarter mesh | 4x4 | 8x8 | 16x16 |
+|---|---|---|---|
+| Gauss point nearest the center | (0.947, 0.947) | (0.974, 0.974) | (0.987, 0.987) |
+| M11 = M22 / (q a^2): MITC4 | 0.04715 | 0.04770 | 0.04784 |
+| M11 = M22 / (q a^2): Navier at the point | 0.04766 | 0.04783 | 0.04787 |
+| Error | 1.07 % | 0.27 % | 0.06 % |
+| Gauss point nearest the side middle (0, 1) | (0.053, 0.947) | (0.026, 0.974) | (0.013, 0.987) |
+| V13 / (q a): MITC4 | -0.2813 | -0.3080 | -0.3224 |
+| V13 / (q a): Navier at the point | -0.3112 | -0.3245 | -0.3310 |
+| Error | 9.6 % | 5.1 % | 2.6 % |
+
+  The moments converge at second order and the transverse shear at first order, as Bathe §5.4.2 notes for the shear
+  of MITC4. The values are the same for span/thickness 100, 1000, and 20,000 (no locking of the shear resultants).
+  V13 is negative at the side x = 0 under a downward load (CSI Eqn. 10-9a).
+
+## M5. Flat shell, loads, mass, and results `[x]` 18 November 2026
+
+Done: `fem3d/elements/shell.py` (`ShellElement`, `ShellBatch`), `Structure.shells` and `add_shell`, `ShellLoad`,
+`Structure.shell_resultants()`, shell resultants in response spectrum analysis, the adapter in both directions,
+shell self-weight in struct_load's direct `apply_self_weight(Structure)`. Tests: `fem3d/tests/test_shell_structure.py`,
+`test_shell_adapter.py`, `test_shell_refusal.py`; `struct_agent/tests/test_shell_reporting.py`.
 
 - Membrane and bending combined in a flat facet element; warped elements projected onto the mean plane (Wilson Ch. 10,
   checked on the page images); pure membrane, pure plate, or full shell.
@@ -220,6 +254,43 @@ elements and show convergence. With the Problem's 16x16 mesh the clamped point l
 - Tests: Scordelis–Lo roof (Problem 2-006) with a convergence table against Belytschko et al. (1985) and Wilson Ch. 10;
   twisted cantilever (Problem 2-004, both loads; moved from M3); one free element has six zero eigenvalues;
   invariance under cyclic renumbering, the axis angle (isotropic material), and a rigid rotation of the model.
+
+Decisions and notes (formulas checked on the page images of Wilson Ch. 10; CSI §10.3, §10.11, §10.12, and §10.18
+read in the manual's text):
+
+- The internal frame is the projection of the corners on the mean plane (through their centroid, normal to axis 3),
+  measured along axes 1 and 2. Since the kernels are invariant under in-plane rotation, the resultants come out in
+  the local 1-2-3 axes without a further rotation.
+- Rigid links of warped corners: u1_flat = u1 - d theta2, u2_flat = u2 + d theta1, with d the height of the corner
+  above the mean plane (Wilson Eq. 10.2, his d being the offset of the mid-surface node from the flat node). A free
+  warped element has exactly six zero eigenvalues and no force under any rigid rotation, which fixes the sign.
+- Areas are those of the mean-plane element (equal to `struct_core.geometry.shell_areas`); lumped mass uses
+  `shell_corner_weights`, so fem3d and struct_load's mass source lump shell mass identically.
+- With a mass source, struct_load already lumps the shells' self-mass at the nodes (M1), so the adapter gives the
+  shells a copy of their material with rho = 0; without a mass source they carry rho x th. Frames are unchanged.
+- The agent's analysis tools refuse models with shells (`struct_agent.tools.analysis.shell_model_refusal`): its
+  load, result, and design tools are frame-only, and shell results would be computed and ignored. This stays until
+  the shell tools are added (ROADMAP.md §4).
+- A membrane alone gives no stiffness to the out-of-plane DOFs and a plate alone none to the in-plane DOFs; as in
+  SAP2000, the user restrains them. Shell nodes are never fixed automatically.
+
+Results (pass/fail tolerances in the tests):
+
+| Case | Result | Reference |
+|---|---|---|
+| Free element, flat and warped, any orientation | 6 zero eigenvalues, rigid motions free of force | exact |
+| 2-001 patch (tension and pure bending) in an arbitrary 3D plane | exact at every Gauss point | closed form |
+| Scordelis-Lo roof, free-edge deflection: 4x4 / 8x8 / 16x16 / 32x32 | 0.3160 / 0.3039 / 0.3017 / 0.3014 ft | 0.3024 (MacNeal and Harder); 0.3086 (Scordelis and Lo) |
+| Twisted beam, in-plane: 12x2 / 24x4 / 48x8 | 0.005445 / 0.005467 / 0.005480 | 0.005424 (beam theory; CSI hand 0.005429) |
+| Twisted beam, out-of-plane: 12x2 / 24x4 / 48x8 | 0.001772 / 0.001770 / 0.001771 | 0.001754 (CSI hand 0.001749) |
+| Simply supported plate, first frequency, lumped: 8x8 / 16x16 | 0.9913 / 0.9976 of exact | Kirchhoff closed form |
+| Same, consistent mass: 8x8 / 16x16 | 1.0171 / 1.0040 of exact | Kirchhoff closed form |
+| Example slab (a/t = 20), center M11 | 3.832 kN-m/m | 0.0479 q a^2 = 3.832 |
+
+SAP2000 gives 0.3068 ft for Scordelis-Lo (6x6, thin) and 0.005402 / 0.001760 for the twisted beam (12x2, thick). The
+twisted beam converges about 1 percent above MacNeal and Harder's beam-theory values; their own good elements are
+within 2 percent on the 12x2 mesh (their Table 10), and the strip is thick (t/w = 0.29), so the test tolerance is 1.5
+percent. The comparison with SAP2000 under mesh refinement is M6.
 
 ## M6. Comparison with SAP2000 (struct_link live session) `[ ]`
 

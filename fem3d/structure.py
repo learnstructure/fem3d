@@ -12,7 +12,8 @@ from .elements.element import ElementBase
 from .elements.frame import FrameElement
 from .elements.truss import TrussElement
 from .elements.spring import SpringElement
-from .loads import PointLoad
+from .elements.shell import ShellBatch, ShellElement
+from .loads import PointLoad, ShellLoad
 
 
 class Structure:
@@ -31,7 +32,10 @@ class Structure:
     nodes : dict of {int/str: Node}
         Mapping of node IDs to Node objects.
     elements : dict of {int/str: ElementBase}
-        Mapping of element IDs to ElementBase objects.
+        Mapping of element IDs to two-node elements (frames, trusses, springs).
+    shells : dict of {int/str: ShellElement}
+        Mapping of element IDs to four-node shell elements, kept apart from ``elements`` so that code written for
+        two-node elements never meets them. IDs are unique across both.
     loads : list
         List of load objects (PointLoad, ElementLoad, etc.).
     K : scipy.sparse.csr_matrix or None
@@ -59,6 +63,8 @@ class Structure:
         self.units = units
         self.nodes: Dict[Union[int, str], Node] = {}
         self.elements: Dict[Union[int, str], ElementBase] = {}
+        self.shells: Dict[Union[int, str], ShellElement] = {}
+        self._shell_batch: Optional[ShellBatch] = None
         self.loads: List = []
         self.K: Optional[sp.csr_matrix] = None
         self.F: Optional[np.ndarray] = None
@@ -75,9 +81,31 @@ class Structure:
         self.nodes[node.id] = node
 
     def add_element(self, element: ElementBase):
-        """Add an element to the structure."""
+        """Add a two-node element (frame, truss, spring) to the structure."""
+        if element.id in self.shells:
+            raise ValueError(f"Element ID {element.id!r} is already used by a shell element")
         element.structure = self
         self.elements[element.id] = element
+
+    def add_shell(self, shell: ShellElement):
+        """Add a shell element to the structure."""
+        if not isinstance(shell, ShellElement):
+            raise TypeError(f"add_shell expects a ShellElement, got {type(shell).__name__}")
+        if shell.id in self.elements or shell.id in self.shells:
+            raise ValueError(f"Shell ID {shell.id!r} is already used by another element")
+        shell.structure = self
+        self.shells[shell.id] = shell
+        self._shell_batch = None
+
+    def shell_batch(self) -> Optional[ShellBatch]:
+        """The shell elements computed together (local axes, transformations, stiffness, results), or None."""
+        if not self.shells:
+            return None
+        if self.neq == 0:
+            self.number_dofs()
+        if self._shell_batch is None:
+            self._shell_batch = ShellBatch(list(self.shells.values()))
+        return self._shell_batch
 
     def add_load(self, load):
         """Add a load (PointLoad, DistributedLoad, etc.) to the structure."""
@@ -93,6 +121,7 @@ class Structure:
             self.nodes[nid].dofs = [dof + i for i in range(6)]
             dof += 6
         self.neq = dof
+        self._shell_batch = None  # shell DOF indices follow the numbering
 
     def _assemble_sparse(
         self,
@@ -143,7 +172,10 @@ class Structure:
         if self.neq == 0:
             self.number_dofs()
 
-        blocks = ((self._element_dofs(el), el.global_stiffness()) for el in self.elements.values())
+        blocks = [(self._element_dofs(el), el.global_stiffness()) for el in self.elements.values()]
+        batch = self.shell_batch()
+        if batch is not None:
+            blocks.append((batch.dofs, batch.global_stiffness()))
         springs = [
             (node.dofs[i], float(k_val))
             for node in self.nodes.values()
@@ -179,6 +211,17 @@ class Structure:
                 dofs = el.node_i.dofs + el.node_j.dofs
                 self.F[dofs] += el.eq_load
 
+        # 4. Uniform loads on shell elements: consistent nodal forces
+        shell_loads = [load for load in self.loads if isinstance(load, ShellLoad)]
+        if shell_loads:
+            batch = self.shell_batch()
+            index = {sid: i for i, sid in enumerate(batch.ids)} if batch is not None else {}
+            for load in shell_loads:
+                if load.shell.id not in index or self.shells[load.shell.id] is not load.shell:
+                    raise ValueError(f"ShellLoad on shell {load.shell.id!r}, which is not in this structure")
+                i = index[load.shell.id]
+                self.F[batch.dofs[i]] += batch.uniform_load(i, load.pressure, load.direction)
+
     def _auto_fix_unstable_dofs(self):
         """
         Automatically constrain inactive degrees of freedom at nodes that
@@ -194,6 +237,10 @@ class Structure:
         if self.neq == 0:
             self.number_dofs()
 
+        # Nodes of shell elements are never fixed automatically: a shell gives them rotational stiffness (or, for a
+        # membrane or plate alone, leaves DOFs for the user to restrain, as SAP2000 does)
+        shell_nodes = {id(n) for sh in self.shells.values() for n in sh.nodes}
+
         # Elements connected to each node, in element order (one pass over the elements)
         connected_to: Dict[int, List[ElementBase]] = {}
         for el in self.elements.values():
@@ -203,7 +250,7 @@ class Structure:
 
         for node in self.nodes.values():
             connected = connected_to.get(id(node), [])
-            if not connected:
+            if not connected or id(node) in shell_nodes:
                 continue
 
             has_frame = any(
@@ -342,11 +389,14 @@ class Structure:
         self._mass_lumped = lumped
         self._mass_rotational = include_rotational_inertia
 
-        # Element mass contributions
-        blocks = (
+        # Element mass contributions (shells: translations only, CSI §10.11)
+        blocks = [
             (self._element_dofs(el), el.mass_matrix(lumped=lumped, include_rotational_inertia=include_rotational_inertia))
             for el in self.elements.values()
-        )
+        ]
+        batch = self.shell_batch()
+        if batch is not None:
+            blocks.append((batch.dofs, batch.mass(lumped=lumped)))
         # Nodal lumped masses and inertias
         nodal = []
         for node in self.nodes.values():
@@ -507,6 +557,21 @@ class Structure:
         }
         return self.modal_results
 
+    def shell_resultants(self) -> Dict[Union[int, str], Dict[str, np.ndarray]]:
+        """Stress resultants of the shell elements for the current displacements (``self.disp``).
+
+        Returns ``{shell_id: {"gauss_points": (4, 8), "corners": (4, 8)}}``, the eight resultants F11, F22, F12,
+        M11, M22, M12, V13, V23 per unit length in the element's local 1-2-3 axes (CSI Analysis Reference Manual
+        §10.18), at the 2x2 Gauss points and extrapolated to the corners in node order.
+        """
+        batch = self.shell_batch()
+        if batch is None:
+            return {}
+        if self.disp is None:
+            raise RuntimeError("Solve the structure before asking for shell resultants")
+        gauss, corners = batch.resultants(self.disp)
+        return {sid: {"gauss_points": gauss[i], "corners": corners[i]} for i, sid in enumerate(batch.ids)}
+
     def commit_state(self):
         """Commit the state of all elements after a converged step."""
         for el in self.elements.values():
@@ -616,6 +681,25 @@ class Structure:
         self.disp = d_comb
 
         elem_forces = rsa.compute_modal_element_forces(method=combination)
+
+        # Shell resultants of every mode, combined component by component with the same rule (peak values, not
+        # concurrent; in each element's local axes)
+        combined_shells: Dict[Union[int, str], Dict[str, np.ndarray]] = {}
+        batch = self.shell_batch()
+        if batch is not None:
+            full = np.zeros((self.neq, modal_u.shape[1]), dtype=float)
+            full[self.free_dofs, :] = modal_u
+            per_mode = [batch.resultants(full[:, m]) for m in range(full.shape[1])]
+            parts = {}
+            for key, k in (("gauss_points", 0), ("corners", 1)):
+                stacked = np.stack([pm[k] for pm in per_mode], axis=-1)  # (N, 4, 8, modes)
+                parts[key] = np.asarray(
+                    rsa.combine_modal_responses(stacked.reshape(-1, stacked.shape[-1]), method=combination)
+                ).reshape(stacked.shape[:-1])
+            combined_shells = {
+                sid: {"gauss_points": parts["gauss_points"][i], "corners": parts["corners"][i]}
+                for i, sid in enumerate(batch.ids)
+            }
         modal_vb = rsa.modal_base_shear()
         combined_vb = rsa.combine_modal_responses(modal_vb, method=combination)
 
@@ -633,6 +717,7 @@ class Structure:
             "combined_displacements": combined_u,
             "modal_element_forces": elem_forces["modal"],
             "combined_element_forces": elem_forces["combined"],
+            "combined_shell_resultants": combined_shells,
             "modal_base_shear": modal_vb,
             "combined_base_shear": combined_vb,
             "combination_method": combination,

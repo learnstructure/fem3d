@@ -38,7 +38,13 @@ try:
         NodeReaction,
         ElementResult,
         BeamSectionForce,
+        ShellElement as ScShellElement,
+        ShellSection as ScShellSection,
+        ShellLoad as ScShellLoad,
+        ShellElementResult,
     )
+    from struct_core.analysis_result import shell_forces_from_array
+    from struct_core.geometry import average_shell_node_forces
     _STRUCT_CORE_AVAILABLE = True
 except ImportError:
     _STRUCT_CORE_AVAILABLE = False
@@ -58,7 +64,8 @@ from ..sections.section import Section
 from ..elements.frame import FrameElement
 from ..elements.truss import TrussElement
 from ..elements.spring import SpringElement
-from ..loads import PointLoad, DistributedLoad, ElementPointLoad
+from ..elements.shell import ShellElement
+from ..loads import PointLoad, DistributedLoad, ElementPointLoad, ShellLoad
 from ..structure import Structure
 from ..results import Results
 
@@ -143,11 +150,7 @@ def model_from_core(
     else:
         model = source
 
-    if getattr(model, "shell_elements", None):
-        raise NotImplementedError(
-            f"fem3d does not analyze shell elements yet (fem3d/SHELL_PLAN.md, milestone M5); the model has "
-            f"{len(model.shell_elements)}."
-        )
+    _check_shells_supported(model)
 
     active_units = parse_units(
         units
@@ -355,6 +358,39 @@ def model_from_core(
                 stacklevel=2,
             )
 
+    # 5c. Shell elements (fem3d/SHELL_PLAN.md, M5). With a mass source, the self-mass of the shells is already in
+    # the nodal masses (struct_load lumps it as SAP2000 does, CSI §10.11), so the shells carry no mass of their own.
+    shell_sections = {s.id: s for s in getattr(model, "shell_sections", [])}
+    massless = {}
+    for se in getattr(model, "shell_elements", []):
+        sec = shell_sections[se.section_id]
+        if sec.material_id not in mat_map:
+            raise ValueError(f"Shell section {sec.id!r} references missing material {sec.material_id!r}")
+        mat = mat_map[sec.material_id]
+        if getattr(structure, "mass_source_result", None) is not None:
+            if sec.material_id not in massless:
+                massless[sec.material_id] = copy.copy(mat)
+                massless[sec.material_id].rho = 0.0
+            mat = massless[sec.material_id]
+        structure.add_shell(ShellElement(
+            se.id,
+            [structure.nodes[nid] for nid in se.node_ids],
+            mat,
+            thickness=sec.thickness,
+            bending_thickness=sec.bending_thickness,
+            behavior=sec.behavior,
+            axis_angle=se.axis_angle,
+            reference_vector=se.reference_vector,
+        ))
+
+    def _add_shell_loads(shell_loads, factor: float = 1.0):
+        for sl in shell_loads:
+            for eid in sl.element_ids:
+                if eid not in structure.shells:
+                    raise ValueError(f"Shell load references missing shell element {eid!r}")
+                structure.add_load(ShellLoad(structure.shells[eid], sl.pressure * factor, sl.direction,
+                                             is_self_weight=sl.is_self_weight))
+
     sw_cache = {}
 
     def _apply_case_self_weight_3d(case_id: str, factor: float = 1.0):
@@ -390,6 +426,7 @@ def model_from_core(
                 structure.add_load(
                     DistributedLoad(el, wx=wx, wy=wy, wz=wz, coord_system="global", is_self_weight=True)
                 )
+        _add_shell_loads(getattr(sw_case, "shell_loads", []), factor)
 
     target_comb = None
     if load_combination_id is not None:
@@ -470,6 +507,7 @@ def model_from_core(
                         my = float(getattr(epl, "my", 0.0) or 0.0) * factor
                         mz = float(getattr(epl, "mz", 0.0) or 0.0) * factor
                         structure.add_load(ElementPointLoad(el, px=px, py=py, pz=pz, mx=mx, my=my, mz=mz, x=pos, coord_system="global"))
+            _add_shell_loads(getattr(lc, "shell_loads", []), factor)
             if getattr(lc, "include_self_weight", False):
                 _apply_case_self_weight_3d(lc.id, factor=factor)
     else:
@@ -564,10 +602,35 @@ def model_from_core(
                             mz = float(getattr(epl, "mz", 0.0) or 0.0)
                             structure.add_load(ElementPointLoad(el, px=px, py=py, pz=pz, mx=mx, my=my, mz=mz, x=pos, coord_system="global"))
 
+                _add_shell_loads(getattr(lc, "shell_loads", []))
                 if getattr(lc, "include_self_weight", False):
                     _apply_case_self_weight_3d(lc.id, factor=1.0)
 
     return structure
+
+
+def _check_shells_supported(model: Any) -> None:
+    """Refuse shell elements that fem3d does not formulate yet, with the reason (no silent approximation)."""
+    shells = getattr(model, "shell_elements", None) or []
+    if not shells:
+        return
+    sections = {s.id: s for s in getattr(model, "shell_sections", [])}
+    triangles = [se.id for se in shells if len(se.node_ids) != 4]
+    if triangles:
+        raise NotImplementedError(
+            f"fem3d implements four-node shell elements only; triangular shells are planned (fem3d/SHELL_PLAN.md, "
+            f"later sessions). Triangular elements: {triangles[:10]}"
+        )
+    missing = [se.id for se in shells if se.section_id not in sections]
+    if missing:
+        raise ValueError(f"Shell elements reference missing shell sections: {missing[:10]}")
+    thin = sorted({se.section_id for se in shells
+                   if sections[se.section_id].plate_theory == "thin" and sections[se.section_id].behavior != "membrane"})
+    if thin:
+        raise NotImplementedError(
+            f"Shell sections {thin} use the thin-plate (Kirchhoff) formulation, which fem3d does not implement yet "
+            f"(DKQ, fem3d/SHELL_PLAN.md). Use plate_theory='thick' (MITC4, which also converges for thin plates)."
+        )
 
 
 def model_to_core(
@@ -727,9 +790,29 @@ def model_to_core(
                 )
             )
 
+    # 4b. Shell elements and shell sections (a section is keyed by its thicknesses, behavior, and material)
+    shell_sec_ids = {}
+    for sh in getattr(structure, "shells", {}).values():
+        mat = sh.material
+        if _mat_key(mat) not in mat_ids:
+            mid = f"mat_{len(mat_ids)+1}"
+            mat_ids[_mat_key(mat)] = mid
+            model.materials.append(ScElasticMaterial(id=mid, E=mat.E, nu=mat.nu, rho=mat.rho / mass_factor,
+                                                     unit_weight=getattr(mat, "unit_weight", None)))
+        key = (sh.thickness, sh.bending_thickness, sh.behavior, mat_ids[_mat_key(mat)])
+        if key not in shell_sec_ids:
+            shell_sec_ids[key] = f"shell_sec_{len(shell_sec_ids)+1}"
+            model.shell_sections.append(ScShellSection(
+                id=shell_sec_ids[key], material_id=key[3], thickness=sh.thickness,
+                bending_thickness=sh.bending_thickness, behavior=sh.behavior, plate_theory="thick"))
+        model.shell_elements.append(ScShellElement(
+            id=sh.id, node_ids=[n.id for n in sh.nodes], section_id=shell_sec_ids[key],
+            axis_angle=sh.axis_angle, reference_vector=sh.reference_vector))
+
     # 5. Loads (transfer existing loads into default_load_case_id)
     sc_point_loads = []
     sc_element_loads = []
+    sc_shell_loads = []
 
     for n in structure.nodes.values():
         if hasattr(n, "load") and any(abs(v) > 0.0 for v in n.load):
@@ -758,6 +841,9 @@ def model_to_core(
                     mz=float(load.mz),
                 )
             )
+        elif isinstance(load, ShellLoad):
+            sc_shell_loads.append(ScShellLoad(element_ids=[load.shell.id], pressure=load.pressure,
+                                              direction=load.direction, is_self_weight=load.is_self_weight))
         elif isinstance(load, DistributedLoad):
             is_loc = getattr(load, "coord_system", "global").lower() == "local"
             if is_loc:
@@ -781,13 +867,14 @@ def model_to_core(
                     )
                 )
 
-    if sc_point_loads or sc_element_loads:
+    if sc_point_loads or sc_element_loads or sc_shell_loads:
         model.load_cases.append(
             ScLoadCase(
                 id=default_load_case_id,
                 name="Live Load" if default_load_case_id == "LIVE" else default_load_case_id,
                 point_loads=sc_point_loads,
                 element_loads=sc_element_loads,
+                shell_loads=sc_shell_loads,
             )
         )
 
@@ -926,8 +1013,29 @@ def result_to_core(source: Union[Results, Structure, object]) -> AnalysisResult:
             max_shear=max((v for s in stations for v in (s.V2, s.V3)), key=abs),
         )
 
+    shell_results: dict = {}
+    shell_node_results: dict = {}
+    batch = structure.shell_batch() if getattr(structure, "shells", None) else None
+    if batch is not None:
+        resultants = structure.shell_resultants()
+        for sid in batch.ids:
+            shell_results[sid] = ShellElementResult(
+                element_id=sid,
+                gauss_points=[shell_forces_from_array(v) for v in resultants[sid]["gauss_points"]],
+                corners=[shell_forces_from_array(v) for v in resultants[sid]["corners"]],
+            )
+        # Corner values averaged at the nodes, plane by plane (struct_core.geometry.average_shell_node_forces)
+        shell_node_results = average_shell_node_forces(
+            connectivity=[[n.id for n in structure.shells[sid].nodes] for sid in batch.ids],
+            corner_forces=[resultants[sid]["corners"] for sid in batch.ids],
+            axes=batch.axes,
+            element_ids=batch.ids,
+        )
+
     return AnalysisResult(
         analysis_case_id="fem3d_linear_static",
         node_results=node_results,
         element_results=element_results,
+        shell_results=shell_results,
+        shell_node_results=shell_node_results,
     )
