@@ -93,12 +93,50 @@ largest relative difference between the sparse and the former dense solver 7.6e-
   tests, and the oracle. Round-off changes logged in `research_paper/experiment_run.md`.
 - **Stop after M2** so that it can be committed on its own.
 
-## M3. Membrane with drilling rotation `[ ]`
+## M3. Membrane with drilling rotation `[x]` 17 November 2026
+
+Done: `fem3d/elements/shell_membrane.py` (vectorized kernel in the element plane: stiffness, condensed strain
+matrices, membrane forces at the Gauss points); tests: `fem3d/tests/test_shell_membrane.py`. The element is not yet
+reachable from `Structure` (M5).
 
 - Ibrahimbegovic, Taylor and Wilson (1990), as presented in Wilson Ch. 9, coded from the rendered page images.
 - Tests: one free element has six zero eigenvalues, no spurious zero-energy modes, and a symmetric stiffness; membrane
   patch test (CSI Problem 2-001, MacNeal and Harder 1985); in-plane cases of the straight, curved, and twisted
   cantilevers (Problems 2-002 to 2-004) against their hand calculations.
+
+Findings that changed the formulation (all checked on page images):
+
+- Wilson Eq. 9.11 is printed with the sign of a clockwise rotation. With counterclockwise drilling rotations (needed to
+  connect to frames) the continuum rotation is (dv/dx - du/dy)/2, as in Ibrahimbegovic and Frey (1992) Eq. 42. A
+  test shows that the printed sign would strain the penalty under a rigid rotation.
+- Wilson's element as printed (tangential mid-side displacements set to zero) cannot represent the Poisson strain of
+  pure bending: rectangles are 1/(1 - nu^2) too stiff (0.9375 of the exact deflection for nu = 0.25, against Wilson's
+  own Table 9.1 value 1.000 and SAP2000's 0.999 in Problem 2-002). The tangential mid-side displacements are kept as
+  four incompatible modes, condensed at element level, as in Ibrahimbegovic and Frey (1992) Eqs. 24, 37, 39, and 45.
+  Pure bending of rectangles is then exact for any nu.
+- With 2x2 integration, rectangles and parallelograms keep a fourth zero-energy mode (alternating rotations at the
+  corners), which spreads through a mesh: SAP2000's Model A of Problem 2-002 (6x1 rectangles, drilling rotations
+  free) is singular with Wilson's element as printed (condition number 5e17). The cure of Cook et al. §3.10, a
+  penalty on theta1 - theta2 + theta3 - theta4, is added, orthogonalized against linear rotation fields so that it
+  does not affect rigid motion, constant strain, or pure bending. Its factor, 0.025 D33, is Wilson's k0; it is a
+  constant of the formulation (`ROTATION_HOURGLASS_FACTOR`), not a user input.
+- Wilson's Table 9.1 values for distorted elements (0.502 and 0.280 for a = 1 and 2) are not reproduced by any
+  variant tried (with or without the incompatible modes, the purification, 3x3 integration, or other penalty
+  locations and factors), so they are not used as test values.
+- The one-element test has 3 zero eigenvalues for the membrane alone (6 in the full shell, M5).
+- The twisted cantilever (2-004) involves bending even under its in-plane load, so it moves to M5.
+
+Results (pass/fail against closed forms; SAP2000 values from the CSI manuals for information only):
+
+| Case | This element | SAP2000 | Closed form |
+|---|---|---|---|
+| 2-001 patch test, prescribed edges or tractions, rotations free | exact | exact | 1333, 1333, 400 psi |
+| 2-002 axial, Models A, B, C | exact | 3E-05 | 3.0E-05 in |
+| 2-002 in-plane shear, Model A (6x1) / 48x8 / F / G | 0.1073 / 0.1081 / 0.1068 / 0.1076 | 0.1072 / - / 0.1061 / 0.1071 | 0.1081 in |
+| 2-002 in-plane moment, Model A / F / G | 9.000E-04 / 8.956E-04 / 8.958E-04 | 8.990E-04 / 8.886E-04 / 8.825E-04 | 9.000E-04 in |
+| 2-002 Models B and C (6x1, distorted), shear | 0.0222, 0.0840 | 0.0227, 0.0804 | 0.1081 in |
+| 2-003 in-plane, 90x1 / 90x3 | 0.08858 / 0.08851 | 0.0845 / 0.0884 | 0.08860 in |
+| Simple beam, unit end couples (Ibrahimbegovic and Frey §6.2) | 1.5000, 0.6000 | - | 1.5, 0.6 |
 
 ## M4. MITC4 plate bending `[ ]`
 
@@ -118,6 +156,7 @@ largest relative difference between the sparse and the former dense solver 7.6e-
 - Results: resultants at the Gauss points, extrapolated to corners, and averaged at nodes as in M1.
 - `struct_core` adapter in both directions.
 - Tests: Scordelis–Lo roof (Problem 2-006) with a convergence table against Belytschko et al. (1985) and Wilson Ch. 10;
+  twisted cantilever (Problem 2-004, both loads; moved from M3); one free element has six zero eigenvalues;
   invariance under cyclic renumbering, the axis angle (isotropic material), and a rigid rotation of the model.
 
 ## M6. Comparison with SAP2000 (struct_link live session) `[ ]`
@@ -134,8 +173,8 @@ largest relative difference between the sparse and the former dense solver 7.6e-
 
 - `CHANGELOG.md` of every package touched, package READMEs, the root README, and one minimal example.
 - ROADMAP.md §4 marked in progress; agent tools for shells listed as the next step.
-- Tests of fem3d, structdyn, struct_core, struct_link, struct_agent, and research_paper/tests; oracle check; log in
-  `research_paper/experiment_run.md`.
+- Tests of fem3d, structdyn, struct_core, struct_link, and struct_agent; oracle check. Log in
+  `research_paper/experiment_run.md` only if a benchmark or oracle result changes.
 
 ## Later sessions
 

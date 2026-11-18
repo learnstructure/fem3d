@@ -7,6 +7,14 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 ## [Unreleased]
 
 ### Added
+- `fem3d.elements.shell_membrane` (SHELL_PLAN.md, M3): a vectorized quadrilateral membrane with drilling rotations,
+  in the element plane (stiffness, strain matrices, and membrane forces at the 2x2 Gauss points). Formulation:
+  Ibrahimbegovic, Taylor and Wilson (1990) as in Wilson (2002) Ch. 9, with the tangential incompatible modes of
+  Ibrahimbegovic and Frey (1992) and a penalty on the alternating-rotation mode (Cook et al. 2002, §3.10). The
+  reasons for the two additions and the sign of Wilson Eq. 9.11 are recorded in SHELL_PLAN.md. Not yet used by
+  `Structure` (M5). Tests: `tests/test_shell_membrane.py` (rank and rigid modes of one element, invariance, the
+  patch tests of CSI Problem 2-001, exact pure bending, and convergence to the hand calculations of Problems 2-002
+  and 2-003).
 - Sparse assembly and solution (SHELL_PLAN.md, M2): `Structure.K` and `Structure.M` are `scipy.sparse` CSR
   matrices, assembled from element blocks in COO form (`Structure._assemble_sparse`, which also takes vectorized
   blocks of N elements for the shell elements to come). The static system is solved by sparse LU (SuperLU);
