@@ -77,13 +77,13 @@ def test_mass_source_preserves_nodal_inertia_and_counts_added_mass_once():
     st = model_from_core(proj)
 
     n2 = st.nodes["2"]
-    assert n2.mass == pytest.approx([15.0, 15.0, 15.0], rel=1e-12)
+    assert n2.mass == pytest.approx([17.0, 17.0, 17.0], rel=1e-12)
     assert n2.inertia == pytest.approx([1.2, 1.2, 1.2], rel=1e-12)
 
     st.number_dofs()
     st.apply_boundary_conditions()
     _, M_ff = st.get_reduced_matrices(lumped=True, include_rotational_inertia=False)
-    # 15.0 nodal + 2.0 half distributed SDL on [ux, uy, uz], 1.2 on [rx, ry, rz]
+    # 5.0 added + 10.0 point SDL + 2.0 lumped distributed SDL on [ux, uy, uz], 1.2 on [rx, ry, rz]
     assert M_ff.diagonal() == pytest.approx([17.0, 17.0, 17.0, 1.2, 1.2, 1.2], rel=1e-12)
 
 
@@ -98,7 +98,7 @@ def test_mass_source_exclude_added_mass_excludes_nodal_mass_and_inertia():
     st = model_from_core(proj)
 
     n2 = st.nodes["2"]
-    assert n2.mass == pytest.approx([10.0, 10.0, 10.0], rel=1e-12)
+    assert n2.mass == pytest.approx([12.0, 12.0, 12.0], rel=1e-12)
     assert n2.inertia == pytest.approx([0.0, 0.0, 0.0], abs=1e-15)
 
     st.number_dofs()
