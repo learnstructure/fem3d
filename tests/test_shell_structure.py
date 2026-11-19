@@ -214,9 +214,11 @@ def test_results_are_invariant_under_rigid_rotation_renumbering_and_axis_angle()
 # --------------------------------------------------------------------------------------------------------------------
 # twisted beam (CSI Problem 2-004)
 # --------------------------------------------------------------------------------------------------------------------
-def twisted_beam(n_long, n_wide, load):
+def twisted_beam_structure(n_long, n_wide, load, renumber=0):
     """L = 12, width 1.1, t = 0.32, E = 29e6, nu = 0.22, twisted 90 degrees from the root (width along Z) to the
-    tip (width along Y), root fixed, unit tip load along Y (in-plane at the tip) or Z (out-of-plane)."""
+    tip (width along Y), root fixed, unit tip load along Y (in-plane at the tip) or Z (out-of-plane). ``renumber``
+    starts every element's node list at another corner (cyclic shift). Returns the solved structure and the tip
+    nodes."""
     L, W = 12.0, 1.1
     pts = []
     for i in range(n_long + 1):
@@ -224,8 +226,11 @@ def twisted_beam(n_long, n_wide, load):
         for j in range(n_wide + 1):
             w = -W / 2 + W * j / n_wide
             pts.append((L * i / n_long, w * np.cos(th), w * np.sin(th)))
-    quads = [[i * (n_wide + 1) + j, (i + 1) * (n_wide + 1) + j, (i + 1) * (n_wide + 1) + j + 1, i * (n_wide + 1) + j + 1]
-             for i in range(n_long) for j in range(n_wide)]
+    quads = []
+    for i in range(n_long):
+        for j in range(n_wide):
+            q = [i * (n_wide + 1) + j, (i + 1) * (n_wide + 1) + j, (i + 1) * (n_wide + 1) + j + 1, i * (n_wide + 1) + j + 1]
+            quads.append(q[renumber:] + q[:renumber])
     s, nodes = structure_from(pts, quads, ElasticMaterial(E=29e6, nu=0.22), 0.32,
                               supports=[(j, [True] * 6) for j in range(n_wide + 1)])
     tip = nodes[-(n_wide + 1):]
@@ -234,6 +239,11 @@ def twisted_beam(n_long, n_wide, load):
     for node, wgt in zip(tip, weights):
         s.add_load(PointLoad(node, fy=wgt if load == "in" else 0.0, fz=wgt if load == "out" else 0.0))
     s.solve()
+    return s, tip
+
+
+def twisted_beam(n_long, n_wide, load):
+    s, tip = twisted_beam_structure(n_long, n_wide, load)
     return np.mean([s.disp[n.dofs[1 if load == "in" else 2]] for n in tip])
 
 
@@ -366,3 +376,37 @@ def test_twist_of_a_thick_strip_converges_to_reissner_mindlin_torsion():
     assert values[0] < values[1] < values[2]
     assert values[2] == pytest.approx(exact, rel=0.001)
 
+
+
+@pytest.mark.parametrize("load", ["in", "out"])
+def test_cyclic_renumbering_of_warped_elements(load):
+    """Twisted beam 12x2: every element is warped beyond SHELL_PLANAR_COSINE, so starting its node list at another
+    corner keeps axis 3 but turns axes 1 and 2 (the SAP2000 rule of struct_core.geometry.shell_local_axes). The
+    stiffness does not depend on the in-plane axes, so it is the same to round-off, and so are the displacements.
+    The corner resultants agree once both are rotated into the same in-plane direction (global X projected on each
+    element) with rotate_shell_resultants. Corners are compared node by node."""
+    from struct_core.geometry.shell import SHELL_PLANAR_COSINE
+
+    base, _ = twisted_beam_structure(12, 2, load)
+    batch = base.shell_batch()
+    x = batch.coords
+    nominal = np.cross(x[:, 1] - x[:, 0], x[:, 2] - x[:, 0])
+    nominal /= np.linalg.norm(nominal, axis=1, keepdims=True)
+    assert np.all(np.sum(nominal * batch.axes[:, 2], axis=1) < SHELL_PLANAR_COSINE)  # all warped
+    rb = base.shell_resultants()
+    turned_somewhere = False
+    for shift in (1, 2, 3):
+        other, _ = twisted_beam_structure(12, 2, load, renumber=shift)
+        # the assembled stiffness is the same to round-off; the solution then differs by at most cond(K) * eps
+        # (cond = 3.5e6 here, so 8e-10; measured 4e-11)
+        assert abs(other.K - base.K).max() <= 1e-14 * abs(base.K).max()
+        assert np.allclose(other.disp, base.disp, rtol=0, atol=1e-9 * np.abs(base.disp).max())
+        axes_o = other.shell_batch().axes
+        assert np.allclose(axes_o[:, 2], batch.axes[:, 2], atol=1e-12)
+        turned_somewhere |= not np.allclose(axes_o[:, 0], batch.axes[:, 0], atol=1e-6)
+        ro = other.shell_resultants()
+        for i, sid in enumerate(batch.ids):
+            corners_b = rotate_shell_resultants(rb[sid]["corners"], batch.axes[i], [1.0, 0.0, 0.0])
+            corners_o = rotate_shell_resultants(np.roll(ro[sid]["corners"], shift, axis=0), axes_o[i], [1.0, 0.0, 0.0])
+            assert np.allclose(corners_o, corners_b, rtol=0, atol=1e-8 * np.abs(corners_b).max()), (shift, sid)
+    assert turned_somewhere  # the in-plane axes did change, so the rotation is exercised

@@ -353,14 +353,33 @@ a clamped edge converge at first order; its transverse shears at a free edge car
 (V13 at the free-edge midspan of the roof decreases only slowly, -148 to -100 lb/ft from 8x8 to 64x64, where
 SAP2000 gives about -5).
 
-## M7. Documentation and checks `[ ]`
+## M7. Documentation and checks `[x]` 18 November 2026
+
+Done: changelogs, package READMEs, root README, ROADMAP.md §4 (marked done for this scope; follow-up items listed), and README examples checked. Final pytest counts (with live SAP2000 tests run): `fem3d` 187, `struct_core` 152, `struct_load` 70, `struct_link` 91 passed / 1 skipped (`test_regenerate_fixture`), `structdyn` 108, `fem2d` 104, `struct_agent` 159 (871 passed total).
 
 - `CHANGELOG.md` of every package touched, package READMEs, the root README, and one minimal example.
-- ROADMAP.md §4 marked in progress; agent tools for shells listed as the next step.
-- Tests of fem3d, structdyn, struct_core, struct_link, and struct_agent; oracle check. Log in
-  `research_paper/experiment_run.md` only if a benchmark or oracle result changes.
+- ROADMAP.md §4 marked done for this scope; follow-up items listed.
+- Tests of fem3d, structdyn, struct_core, struct_load, struct_link, fem2d, and struct_agent. Frame paths and benchmark/oracle results are unchanged, so no entry was added to `research_paper/experiment_run.md`.
 
 ## Later sessions
 
 DKQ and DKT thin plates, triangles (Allman membrane), mesh generation, `.s2k`/`.e2k` area exchange, agent tools, and
 slab design.
+
+Known differences (M5 and M6), to keep in mind until they are resolved:
+
+- **Corner moments at clamped edges converge at first order.** MITC4 curvatures are constant along their bending
+  direction within an element, so the corner moment at a clamped edge is the moment half an element away: 12 percent
+  low on a 16x16 quarter of the plate of Problem 2-005 (40, 23, 12 percent on 4x4, 8x8, 16x16; SAP2000 3.5 percent).
+  Resolve this through DKQ or a better nodal recovery (for example superconvergent patch recovery) before slab design
+  uses shell moments.
+- **Torsion of narrow strips follows Saint-Venant, not SAP2000's thin-plate value.** MITC4 (Reissner-Mindlin) resolves
+  the edge zone of a thick strip and converges to J = (b t^3 / 3)(1 - tanh(mu b / 2) / (mu b / 2)), within
+  0.3 percent of the Saint-Venant constant; SAP2000's thick plate converges to b t^3 / 3. At b / t = 2 (Problem 2-002,
+  load case 4) fem3d is 45 percent softer in twist (0.003416 against 0.002348 in), and the twisted beam of Problem
+  2-004 (b / t = 3.4) converges 1 to 1.5 percent apart.
+- **Warped elements reproduce SAP2000's undocumented axis rule.** The orientation rules apply to the plane through j1,
+  j2, j3; axis 3 is then the midpoint normal and axis 2 the projection of the first axis 2, unless the two normals are
+  within 0.81 degrees (`SHELL_PLANAR_COSINE`). This was measured on SAP2000 27.1 and is not in the CSI manual; a later
+  SAP2000 version could change it, and `struct_link/tests/test_sap2000_shells.py` would show it. A cyclic
+  renumbering of a warped element turns its axes 1 and 2 (results, rotated into a common direction, are unchanged).

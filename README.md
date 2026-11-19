@@ -1,8 +1,8 @@
 # fem3d
 
-**A 3D Finite Element Analysis library for general space frames and trusses in Python, based on the Direct Stiffness Method.**
+**A 3D Finite Element Analysis library for space frames, trusses, springs, and four-node flat shells in Python, based on the Direct Stiffness Method.**
 
-`fem3d` provides a full implementation of the 3D elastic beam-column frame element (12 DOF), space truss, and spring elements. It supports linear static analysis, modal analysis, and linear elastic buckling analysis. It mirrors the architecture of the `fem2d` package, extended to 3D.
+`fem3d` implements 3D elastic beam-column frame elements (12 DOF), space trusses, springs, and four-node flat shell elements (24 DOF). It supports linear static analysis, modal analysis, response spectrum analysis, and linear elastic buckling analysis, with sparse assembly (`scipy.sparse`).
 
 ---
 
@@ -281,8 +281,25 @@ Membrane and plate in one flat element with six DOFs per node (`fem3d/SHELL_PLAN
 - **Plate:** MITC4 (Dvorkin and Bathe 1984; Bathe 2014, §5.4.2), shear correction 5/6. Thick-plate (Mindlin) formulation that does not lock as the plate becomes thin; thin-plate (Kirchhoff) sections are refused until DKQ is added.
 - **Geometry:** local axes 1-2-3 from `struct_core.geometry.shell_local_axes` (SAP2000 rules, `axis_angle`, `reference_vector`); warped elements are projected on their mean plane with rigid links (Wilson Eq. 10.2). `behavior` is `"shell"`, `"membrane"`, or `"plate"`; `thickness` (th) gives membrane stiffness, mass, and self-weight, `bending_thickness` (thb) the plate stiffness.
 - **Results:** `Structure.shell_resultants()` gives F11, F22, F12, M11, M22, M12, V13, V23 per unit length in local axes (CSI §10.18 signs: positive moments put the bottom face in tension) at the 2x2 Gauss points and extrapolated to the corners; `result_to_core` adds node averages per plane. Response spectrum analysis returns `combined_shell_resultants`.
-- **Mass:** translations only, rho x th per unit area, lumped as SAP2000 does (CSI §10.11) or consistent.
-- Shells are stored in `Structure.shells` (added with `add_shell`), apart from the two-node elements. Quadrilaterals only; triangles are planned.
+- **Mass:** translations only, `rho * thickness` per unit area, lumped as SAP2000 does (CSI §10.11, `struct_core.geometry.shell_corner_weights`) or consistent (`lumped=False`).
+- **Storage and API:** shells are stored in `Structure.shells` and added with `Structure.add_shell(ShellElement(...))`, apart from two-node elements (`Structure.elements`). Element IDs are unique across both lists. Uniform surface loads use `ShellLoad(shell, pressure, direction="local_3")`. Self-weight uses `struct.apply_self_weight()` or `struct_load.apply_self_weight(struct)`.
+- **Limits and refusals:**
+  - **Four-node quadrilaterals only.** `ShellElement` and `model_from_core` refuse three-node triangles with `ValueError` until triangular shells (Allman membrane, DKT plate) are added.
+  - **Thick-plate (Mindlin/Reissner) bending only.** `model_from_core` refuses `ShellSection(plate_theory="thin")` (except when `behavior="membrane"`) with `ValueError` until DKQ is added. MITC4 also converges for thin plates without shear locking.
+  - **No auto-stabilization on shell nodes.** A membrane-only element gives no stiffness to out-of-plane DOFs, and a plate-only element gives none to in-plane DOFs. As in SAP2000, the user must restrain unmodeled DOFs.
+  - `SimpleFrame` covers frame, truss, and spring elements only; build shell models with `Structure` or `model_from_core`.
+
+**Known differences** (verified against closed forms and SAP2000 27.1; details in `SHELL_PLAN.md`):
+
+- Corner moments at clamped edges converge at first order: MITC4 curvatures are constant along their bending
+  direction within an element, so a corner moment at a support is about 12 percent low on a 16x16 quarter plate
+  (Problem 2-005). Use Gauss-point values or a finer mesh near supports; DKQ or a better nodal recovery will resolve
+  this before slab design uses shell moments.
+- Torsion of narrow strips follows Saint-Venant (Reissner-Mindlin edge zone), not SAP2000's thin-plate value
+  b t^3 / 3: at b / t = 2 fem3d is 45 percent softer in twist, and the twisted beam of Problem 2-004 converges 1 to
+  1.5 percent apart from SAP2000.
+- Warped elements reproduce SAP2000's local-axis rule, which the CSI manual does not state (measured on SAP2000 27.1):
+  the axes are oriented on the plane through j1, j2, j3, then projected on the element plane.
 
 ### Auto-Stabilization of Truss-Only Nodes
 
@@ -296,32 +313,42 @@ At nodes connected only to truss or spring elements (no frame elements), there i
 fem3d/
 ├── pyproject.toml
 ├── README.md
+├── CHANGELOG.md
+├── SHELL_PLAN.md              # Shell element implementation plan and verification tables
 ├── LICENSE
 ├── fem3d/
 │   ├── __init__.py            # Public API exports
 │   ├── nodes.py               # Node class (6 DOF)
 │   ├── materials/
 │   │   ├── material.py        # Abstract MaterialBase
-│   │   └── elastic.py         # ElasticMaterial (E, nu, G, rho)
+│   │   └── elastic.py         # ElasticMaterial (E, nu, G, rho, unit_weight)
 │   ├── sections/
-│   │   └── section.py         # Section (A, I2, I3, J) with factory methods
+│   │   └── section.py         # Section (A, I2, I3, J, As2, As3) with factory methods
 │   ├── elements/
 │   │   ├── element.py         # ElementBase (geometry, local axes v1, v2, v3, T matrix)
-│   │   ├── frame.py           # FrameElement (12x12 K, M, Kg with I2, I3)
+│   │   ├── frame.py           # FrameElement (12x12 K, M, Kg with I2, I3, shear deformation)
 │   │   ├── truss.py           # TrussElement (axial only)
-│   │   └── spring.py          # SpringElement (diagonal 12x12)
-│   ├── loads.py               # PointLoad, DistributedLoad (w1, w2, w3), ElementPointLoad
-│   ├── structure.py           # Structure: assembly, BCs, linear solver, modal
+│   │   ├── spring.py          # SpringElement (diagonal 12x12)
+│   │   ├── shell.py           # ShellElement, ShellBatch (24x24 flat shell, warped projection)
+│   │   ├── shell_membrane.py  # Vectorized drilling-rotation quadrilateral membrane kernel
+│   │   └── shell_plate.py     # Vectorized MITC4 thick-plate bending kernel
+│   ├── loads.py               # PointLoad, DistributedLoad, ElementPointLoad, ShellLoad
+│   ├── structure.py           # Structure: sparse assembly, BCs, linear solver, modal, RSA
 │   ├── results.py             # Results: DataFrames + text report
 │   ├── buckling_analysis.py   # Linear elastic buckling
 │   ├── utils/
 │   │   └── simple_frame.py    # SimpleFrame / SimpleFrame3D high-level API
 │   └── adapters/
-│       └── struct_core_adapter.py  # struct_core bidirectional adapter
+│       └── struct_core_adapter.py  # struct_core bidirectional adapter (frames and shells)
 ├── examples/
-│   └── linear/
-│       ├── frame_58.py
-│       └── frame_84.py
+│   ├── linear/
+│   │   ├── shell_plate.py     # Simply supported square slab with shell elements
+│   │   ├── frame_elf.py
+│   │   ├── frame_gravity_lateral.py
+│   │   ├── frame_58.py
+│   │   └── frame_84.py
+│   └── dynamic/
+│       └── ...
 └── tests/
     ├── conftest.py
     ├── test_frame_3d.py
@@ -329,6 +356,12 @@ fem3d/
     ├── test_spring_3d.py
     ├── test_modal_buckling.py
     ├── test_results.py
+    ├── test_sparse_assembly.py
+    ├── test_shell_membrane.py
+    ├── test_shell_plate.py
+    ├── test_shell_structure.py
+    ├── test_shell_adapter.py
+    ├── test_shell_refusal.py
     └── test_struct_core_adapter.py
 ```
 
@@ -687,8 +720,12 @@ structure = model_from_core(
 
 # AnalysisResult mapping:
 #   node_results: Dict[NodeId, NodeResult] with NodeDisplacement (6 DOF) + NodeReaction (6 DOF)
-#   element_results: Dict[ElementId, ElementResult] with BeamSectionForce at i and j ends
+#   element_results: Dict[ElementId, ElementResult] with BeamSectionForce at STANDARD_STATIONS
+#   shell_results: Dict[ElementId, ShellElementResult] with ShellForces at Gauss points and corners
+#   shell_node_results: Dict[NodeId, List[ShellNodeForces]] averaged per plane (never across slab-wall junctions)
 ```
+
+For shell models, `model_from_core` converts `ShellSection`, `ShellElement`, and `ShellLoad`, applies shell self-weight (`include_self_weight=True`), and avoids double-counting shell mass when a `MassSource` already lumps shell mass at nodes. It refuses three-node shell elements and `plate_theory="thin"` sections (except `behavior="membrane"`). `model_to_core` exports `Structure.shells` and `ShellLoad` back to `struct_core`.
 
 ### Benchmark Examples
 
@@ -814,7 +851,11 @@ The stiffness matrices, mass matrices, and transformation procedures in `fem3d` 
 | **Weaver, W. & Gere, J. M.** (1990). *Matrix Analysis of Framed Structures* (3rd ed.). Van Nostrand Reinhold. Sec. 4.10–4.11. | Local axes, transformation matrix, sign convention |
 | **McGuire, W., Gallagher, R. H., & Ziemian, R. D.** (2000). *Matrix Structural Analysis* (2nd ed.). Wiley. Sec. 5.1. | 3D beam stiffness, end releases |
 | **Cook, R. D., Malkus, D. S., Plesha, M. E., & Witt, R. J.** (2002). *Concepts and Applications of Finite Element Analysis* (4th ed.). Wiley. | Consistent mass, geometric stiffness |
-| **Bathe, K. J.** (1996). *Finite Element Procedures*. Prentice Hall. | Eigenvalue solvers, buckling |
+| **Bathe, K. J.** (2014). *Finite Element Procedures* (2nd ed.). §5.4.2. | MITC4 plate bending, eigenvalue solvers, buckling |
+| **Dvorkin, E. N. & Bathe, K. J.** (1984). *A continuum mechanics based four-node shell element for general non-linear analysis*. Eng. Comput. 1(1), 77–88. | MITC4 assumed transverse shear strain |
+| **Ibrahimbegovic, A., Taylor, R. L., & Wilson, E. L.** (1990). *A robust quadrilateral membrane finite element with drilling degrees of freedom*. Int. J. Numer. Meth. Eng. 30, 445–457. | Drilling-rotation membrane element |
+| **Ibrahimbegovic, A. & Frey, F.** (1992). *Stress resultant geometrically nonlinear shell theory with drilling rotations*. Int. J. Numer. Meth. Eng. 35, 113–146. | Tangential incompatible modes for pure bending |
+| **Wilson, E. L.** (2002). *Three-Dimensional Static and Dynamic Analysis of Structures*. Ch. 9–10. | Membrane drilling formulation, warped shell rigid links |
 
 > **Note:** Items marked `# TODO: verify` in the source code or test files have computed values that need manual cross-check against your textbook, particularly for biaxial bending sign conventions (the $\theta_y$ sign) and moment reaction directions.
 
@@ -831,7 +872,7 @@ frame = SimpleFrame()
 # ... build 3D nodes, elements, supports, and lumped masses ...
 
 # Execute 3D Response Spectrum Analysis along X direction
-params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", damping_ratio=0.05)
+params = SeismicParameters(sds=1.0, sd1=0.6, tl=8.0, site_class="D", system_type="rc_smf", damping_ratio=0.05)
 rsa_x = frame.response_spectrum_analysis(
     params=params,
     n_modes=12,
@@ -881,6 +922,7 @@ analysis_result = result_to_core(structure, analysis_case_id="Static_3D")
 The `examples/` directory contains complete, verified runnable scripts:
 
 ### Linear Static & Code Procedures (`examples/linear/`)
+- `shell_plate.py`: Simply supported square slab modeled with four-node `ShellElement`s and `ShellLoad`, compared against the Kirchhoff plate solution (Timoshenko Table 8).
 - `rc_frame_model.py`: Reusable canonical 2-story 3D RC Space Frame model constructor (`create_rc_frame` and `create_rc_frame_core`).
 - `frame_elf.py`: ASCE 7-16 / 7-22 Section 12.8 Equivalent Lateral Force (ELF) seismic analysis using `struct_core`, `struct_load.LoadGenerator.apply_lateral_seismic`, and `fem3d.adapters.model_from_core` with Mass Source multipliers (1.0 SuperDead + 0.25 LIVE), base shear $V$, base reactions, and upper story displacements.
 - `frame_gravity_lateral_dead.py`: 3D RC Space Frame under combined gravity, lateral loads, and automated element self-weight via `struct_load`.
@@ -902,7 +944,5 @@ conda activate structeng
 cd fem3d
 pytest -v
 ```
-
-All 52 tests pass cleanly.
 
 

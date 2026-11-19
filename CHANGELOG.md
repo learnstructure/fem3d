@@ -7,6 +7,11 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 ## [Unreleased]
 
 ### Added
+- `tests/test_shell_structure.py`: invariance of a warped mesh (twisted beam 12x2) under cyclic renumbering of
+  every element: the stiffness is the same to round-off, and the corner resultants agree after rotation into a
+  common direction, although the in-plane axes turn (SAP2000's rule for warped elements). README and
+  SHELL_PLAN.md record the known differences: corner moments at clamped edges, torsion of narrow strips, and the
+  local axes of warped elements.
 - `tests/test_shell_structure.py`: the twist of a thick strip (CSI Problem 2-002, load case 4) converges to the
   closed-form torsion of a Reissner-Mindlin strip with free edges (0.1 percent on 96x16), which for this strip is
   within 0.3 percent of the Saint-Venant value; SAP2000 converges to the shell-theory value b t^3 / 3 instead
@@ -56,7 +61,7 @@ All notable changes to `fem3d` are recorded in this file. The format follows
   K, M, displacements, and reactions with the former dense assembly and solution, the modal periods on both
   sides of the dense limit, and the modal and response spectrum analysis of a 2904-DOF frame.
 - `buckling_analysis.assemble_geometric_stiffness` returns a sparse Kg; the reduced eigenproblem is still
-  solved densely.
+  solved densely. `Results.create_report` formats sparse K.
 - `SHELL_PLAN.md`: the implementation plan of shell elements (ROADMAP §4).
 - `fem3d.loads.bending_shape_functions`: the exact interpolation (deflection and cross-section rotation) of a
   two-node Timoshenko beam, which reduces to the Hermite cubics without shear deformation.
@@ -92,3 +97,5 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 - `model_from_core` applies the element `mass` modifier (it was ignored) and no longer lets the `A` modifier scale
   the mass (the element mass was rho times the modified area). As in SAP2000 27.1, measured in the struct_link tests,
   the A modifier scales the axial stiffness only and the mass modifier the whole member mass.
+- `examples/dynamic/02_response_spectrum_analysis_3d.py` now passes `system_type="rc_smf"` to `SeismicParameters`
+  (required when `r_factor` is not given).
