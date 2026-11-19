@@ -81,6 +81,10 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 - A singular stiffness matrix is reported from the sparse LU factorization, with the same `LinAlgError` message.
 
 ### Fixed
+- `model_from_core` with a `MassSource`: preserved `Node.inertia` when `include_added_mass=True` (previously reset to
+  zero when `set_mass(mass=...)` was called) and cleared both nodal mass and inertia when `include_added_mass=False`;
+  when `include_element_mass=False`, removed frame and truss element self-mass (consistent with shells) so element
+  self-mass is not included in `M`. Test: `tests/test_mass_source_adapter.py`.
 - Member loads on Timoshenko members (`include_shear_deformation=True`): the equivalent nodal loads of
   `DistributedLoad` and `ElementPointLoad` used Euler-Bernoulli (Hermite) shape functions, which are exact only for
   full-span uniform loads (and loads symmetric about midspan). Partial, trapezoidal, and off-center point loads gave
