@@ -46,6 +46,7 @@ try:
         ConcreteMaterial as ScConcreteMaterial,
         Node as ScNode,
         RectangularSection as ScRectangularSection,
+        Story as ScStory,
         StructuralModel,
         Support as ScSupport,
         parse_units,
@@ -59,7 +60,10 @@ except ImportError:
 X_COORDS = [0.0, 4.0, 10.0]  # 2 bays: 4.0 m and 6.0 m
 Y_COORDS = [0.0, 5.0]        # 1 bay: 5.0 m
 Z_COORDS = [0.0, 3.5, 7.0]   # 2 stories: 3.5 m each
-STORY_ELEVATIONS = [3.5, 7.0]
+STORIES = [
+    ScStory(name="Story1", elevation=3.5),
+    ScStory(name="Story2", elevation=7.0),
+] if _STRUCT_CORE_AVAILABLE else []
 
 # Canonical Section Dimensions
 COL_WIDTH = 0.30   # along global X
@@ -99,7 +103,7 @@ def create_rc_frame(
         - `x_coords`: List[float] [0.0, 4.0, 10.0]
         - `y_coords`: List[float] [0.0, 5.0]
         - `z_coords`: List[float] [0.0, 3.5, 7.0]
-        - `story_elevations`: List[float] [3.5, 7.0]
+        - `stories`: List[Story] [Story('Story1', 3.5), Story('Story2', 7.0)]
         - `material`: ElasticMaterial
         - `col_section`: Section
         - `beam_section`: Section
@@ -182,7 +186,7 @@ def create_rc_frame(
     struct.x_coords = list(X_COORDS)
     struct.y_coords = list(Y_COORDS)
     struct.z_coords = list(Z_COORDS)
-    struct.story_elevations = list(STORY_ELEVATIONS)
+    struct.stories = list(STORIES)
     struct.material = material
     struct.col_section = col_section
     struct.beam_section = beam_section
@@ -208,12 +212,12 @@ def create_rc_frame_core(
     -------
     StructuralModel
         Populated struct_core.StructuralModel object with defined nodes, elements,
-        materials, sections, supports, and story_elevations=[3.5, 7.0].
+        materials, sections, supports, and stories=[Story('Story1', 3.5), Story('Story2', 7.0)].
     """
     if not _STRUCT_CORE_AVAILABLE:
         raise ImportError("struct_core package is required for create_rc_frame_core()")
 
-    model = StructuralModel(units=units, story_elevations=list(STORY_ELEVATIONS))
+    model = StructuralModel(units=units, stories=[s.model_copy() for s in STORIES])
 
     # Material: C30 concrete (f'c = 30 MPa)
     mat = ScConcreteMaterial(

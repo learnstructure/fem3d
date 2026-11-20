@@ -78,6 +78,7 @@ def create_3d_frame_model():
     live_loads = [DistributedLoad(element_id=bid, wz=-10.0) for bid in beam_ids]
     lc_live = LoadCase(id="LIVE", name="Live Load", element_loads=live_loads)
 
+    from struct_core import Story
     model = StructuralModel(
         nodes=nodes,
         elements=elements,
@@ -85,7 +86,7 @@ def create_3d_frame_model():
         sections=[sec_col, sec_beam],
         supports=supports,
         load_cases=[lc_dead, lc_live],
-        story_elevations=[3.5],
+        stories=[Story(name="Story1", elevation=3.5)],
     )
     return model
 

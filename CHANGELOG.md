@@ -6,6 +6,11 @@ All notable changes to `fem3d` are recorded in this file. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Updated frame ELF and dynamic examples and `tests/test_frame_elf.py` from `story_elevations` to `Story` (`stories`
+  and explicit `base_elevation`), and updated the ELF frame base shear expectation from `132.37 kN` to `128.59 kN`
+  (`node13_ux_mm` `8.9326 -> 8.7545 mm`) after unifying restrained-base mass exclusion in `struct_load`.
+
 ### Added
 - `tests/test_shell_structure.py`: invariance of a warped mesh (twisted beam 12x2) under cyclic renumbering of
   every element: the stiffness is the same to round-off, and the corner resultants agree after rotation into a

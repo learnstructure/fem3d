@@ -14,7 +14,7 @@ import numpy as np
 from fem3d.examples.linear.rc_frame_model import (
     create_rc_frame,
     create_rc_frame_core,
-    STORY_ELEVATIONS,
+    STORIES,
 )
 from fem3d.adapters import model_to_core, model_from_core
 from fem3d import Results
@@ -26,6 +26,7 @@ from struct_core import (
     MassSource,
     MassSourceFactor,
     PointLoad as ScPointLoad,
+    Story,
 )
 from struct_load import LoadGenerator, apply_self_weight, calculate_mass_source
 from struct_load.codes.asce7_seismic import (
@@ -41,7 +42,7 @@ def test_rc_frame_model_creation():
     assert len(struct.elements) == 26
     assert len(struct.columns) == 12
     assert len(struct.beams) == 14
-    assert struct.story_elevations == [3.5, 7.0]
+    assert struct.stories == [Story(name="Story1", elevation=3.5), Story(name="Story2", elevation=7.0)]
 
     # Check fixed base supports at z=0 (nodes 1..6)
     for nid in range(1, 7):
@@ -52,7 +53,7 @@ def test_rc_frame_model_creation():
     assert len(core_model.nodes) == 18
     assert len(core_model.elements) == 26
     assert len(core_model.supports) == 6
-    assert core_model.story_elevations == [3.5, 7.0]
+    assert core_model.stories == [Story(name="Story1", elevation=3.5), Story(name="Story2", elevation=7.0)]
 
 
 def test_mass_source_and_elf_calculation():
@@ -99,13 +100,14 @@ def test_mass_source_and_elf_calculation():
         importance_factor=1.0,
         system_type="rc_smf",
     )
-    story_elevations = [3.5, 7.0]
-    story_weights = [res.story_weights[h] for h in story_elevations]
+    stories = [Story(name="Story1", elevation=3.5), Story(name="Story2", elevation=7.0)]
+    story_weights = [res.story_weights[s.elevation] for s in stories]
 
     elf_res = calculate_seismic_elf(
-        story_elevations=story_elevations,
+        stories=stories,
         story_weights=story_weights,
         params=params,
+        base_elevation=0.0,
         units="kN, m",
     )
 
@@ -113,8 +115,9 @@ def test_mass_source_and_elf_calculation():
     assert pytest.approx(elf_res.ta, abs=0.01) == 0.269
     # Cs = SDS / (R/Ie) = 1.0 / 8.0 = 0.1250
     assert pytest.approx(elf_res.cs, rel=1e-3) == 0.1250
-    # Base shear V = 0.1250 * 1058.96 = 132.37 kN
-    assert pytest.approx(elf_res.base_shear, rel=1e-3) == 132.37
+    # Effective seismic weight excludes 30.24 kN lower half of ground-story columns at the restrained base:
+    # W = 1058.96 - 30.24 = 1028.72 kN -> V = 0.1250 * 1028.72 = 128.59 kN (matches SAP2000/ETABS)
+    assert pytest.approx(elf_res.base_shear, rel=1e-3) == 128.59
 
     # Story force sum must equal base shear
     assert pytest.approx(sum(elf_res.story_forces.values()), rel=1e-3) == elf_res.base_shear
@@ -139,21 +142,22 @@ def test_frame_elf_equilibrium():
     res = calculate_mass_source(core_model, mass_source=ms)
 
     params = SeismicParameters(sds=1.00, sd1=0.40, site_class="D", risk_category="II", r_factor=8.0, importance_factor=1.0, system_type="rc_smf")
-    story_elevations = [3.5, 7.0]
-    story_weights = [res.story_weights[h] for h in story_elevations]
+    stories = [Story(name="Story1", elevation=3.5), Story(name="Story2", elevation=7.0)]
+    story_weights = [res.story_weights[s.elevation] for s in stories]
 
     elf_res = calculate_seismic_elf(
-        story_elevations=story_elevations,
+        stories=stories,
         story_weights=story_weights,
         params=params,
+        base_elevation=0.0,
         units="kN, m",
     )
 
     # Apply lateral loads to face nodes at x=0
     eq_loads = []
-    for idx, elev in enumerate(story_elevations, start=1):
+    for idx, story in enumerate(stories, start=1):
         fx_tot = elf_res.story_forces[idx]
-        face_nodes = [node.id for (x, y, z), node in node_grid.items() if abs(z - elev) < 1e-3 and abs(x - 0.0) < 1e-3]
+        face_nodes = [node.id for (x, y, z), node in node_grid.items() if abs(z - story.elevation) < 1e-3 and abs(x - 0.0) < 1e-3]
         for nid in face_nodes:
             eq_loads.append(ScPointLoad(node_id=nid, fx=fx_tot / len(face_nodes)))
 
@@ -239,9 +243,9 @@ def test_frame_elf_example():
     df_disp = results.node_displacements()
     node13_ux_mm = float(df_disp[df_disp["node"] == 13]["ux"].iloc[0]) * 1000.0
 
-    # Assertions: period, base shear, and top story one node displacement
+    # Assertions: period, base shear (excluding 30.24 kN at restrained base), and top story displacement
     assert pytest.approx(elf_res.ta, rel=1e-3) == 0.269
-    assert pytest.approx(elf_res.base_shear, rel=1e-3) == 132.37
-    assert pytest.approx(node13_ux_mm, rel=1e-3) == 8.9326
+    assert pytest.approx(elf_res.base_shear, rel=1e-3) == 128.59
+    assert pytest.approx(node13_ux_mm, rel=1e-3) == 8.7545
 
 

@@ -136,12 +136,12 @@ def main():
     print("\n" + "-" * 80)
     print(f"{'Story':<8} | {'Elev (m)':<10} | {'Weight Wi (kN)':<16} | {'Cvx':<10} | {'Force Fx (kN)':<15} | {'Shear Vx (kN)':<15}")
     print("-" * 80)
-    for idx, elev in enumerate(core_model.story_elevations, start=1):
+    for idx, story in enumerate(core_model.stories, start=1):
         w_i = elf_result.story_weights[idx]
         cvx_i = elf_result.cvx[idx] if elf_result.cvx else 0.0
         f_i = elf_result.story_forces[idx]
         v_i = elf_result.story_shears[idx] if elf_result.story_shears else f_i
-        print(f"Level {idx:<2} | {elev:<10.1f} | {w_i:<16.2f} | {cvx_i:<10.4f} | {f_i:<15.2f} | {v_i:<15.2f}")
+        print(f"Level {idx:<2} | {story.elevation:<10.1f} | {w_i:<16.2f} | {cvx_i:<10.4f} | {f_i:<15.2f} | {v_i:<15.2f}")
     print("-" * 80)
 
     # Support Reactions at Base (Z = 0.0 m)
