@@ -152,6 +152,11 @@ def model_from_core(
 
     _check_shells_supported(model)
 
+    if getattr(model, "diaphragms", None):
+        raise ValueError(
+            f"fem3d does not support diaphragms yet; the model has {len(model.diaphragms)}."
+        )
+
     active_units = parse_units(
         units
         or getattr(getattr(source, "metadata", None), "units", None)
