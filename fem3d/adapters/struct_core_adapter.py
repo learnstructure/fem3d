@@ -17,6 +17,7 @@ try:
         StructuralModel,
         Project,
         Metadata,
+        Diaphragm as ScDiaphragm,
         Node as ScNode,
         Support as ScSupport,
         ElasticMaterial as ScElasticMaterial,
@@ -151,11 +152,6 @@ def model_from_core(
         model = source
 
     _check_shells_supported(model)
-
-    if getattr(model, "diaphragms", None):
-        raise ValueError(
-            f"fem3d does not support diaphragms yet; the model has {len(model.diaphragms)}."
-        )
 
     active_units = parse_units(
         units
@@ -409,6 +405,16 @@ def model_from_core(
             axis_angle=se.axis_angle,
             reference_vector=se.reference_vector,
         ))
+
+    # 5d. Rigid diaphragms (enforce after nodes and supports are registered)
+    for d in getattr(model, "diaphragms", []):
+        rigidity = getattr(d, "rigidity", "rigid")
+        if rigidity != "rigid":
+            raise ValueError(
+                f"Diaphragm {d.id!r} has unsupported rigidity {rigidity!r}; semi-rigid diaphragms "
+                f"require ETABS slab shells, which are deferred."
+            )
+        structure.add_diaphragm(d.id, d.node_ids, axis=d.axis, name=d.name)
 
     def _add_shell_loads(shell_loads, factor: float = 1.0):
         for sl in shell_loads:
@@ -835,6 +841,17 @@ def model_to_core(
         model.shell_elements.append(ScShellElement(
             id=sh.id, node_ids=[n.id for n in sh.nodes], section_id=shell_sec_ids[key],
             axis_angle=sh.axis_angle, reference_vector=sh.reference_vector))
+
+    # 4c. Rigid diaphragms
+    for d in getattr(structure, "diaphragms", {}).values():
+        model.diaphragms.append(
+            ScDiaphragm(
+                id=str(d.id),
+                name=d.name,
+                node_ids=list(d.node_ids),
+                axis=d.axis,
+            )
+        )
 
     # 5. Loads (transfer existing loads into default_load_case_id)
     sc_point_loads = []

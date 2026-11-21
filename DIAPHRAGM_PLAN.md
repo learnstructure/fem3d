@@ -29,11 +29,13 @@ Done: all items below. Test runs after final code edits: `struct_core` 193 passe
 - Refusals: `fem2d` refuses diaphragms permanently (2D plane solver); `fem3d` and `struct_link` writers hold temporary M1 refusals until M2 and M4.
 - Updates to `ROADMAP.md`: accidental torsion moved to §1a P1 as next task; new §4 P2 item for mass distribution on floors without diaphragms.
 
-## M2. `fem3d` and `structdyn` solver support `[ ]`
+## M2. `fem3d` and `structdyn` solver support `[x]` 21 November 2026
 
-- `fem3d.Structure` sparse transformation `T`, `expand_displacements`, `influence_vector`, `reduce_matrix`, `get_reduced_matrices` (`T^T K T`, `T^T M T`).
-- Static, modal, RSA, buckling, and `struct_core` adapter support; `structdyn` (`MDF`, `ModalAnalysis`, `ResponseSpectrumAnalysis`) updated to eliminate direct `free_dofs` slicing assumptions.
-- Closed-form, multi-story, beam axial force, unit-invariance, and zero-diaphragm identity regression tests.
+Done: all items below. Test runs after final code edits: `fem3d` 202 passed, `structdyn` 111 passed, `struct_core` 193 passed (506 passed total). New/updated tests: `fem3d/tests/test_diaphragms.py`, `fem3d/tests/test_diaphragm_refusal.py`, `structdyn/tests/test_diaphragms.py`.
+
+- `fem3d.Structure` sparse transformation `T`, `expand_displacements`, `influence_vector`, `reduce_matrix`, `reduce_vector`, `get_reduced_matrices` (`T^T K T`, `T^T M T`).
+- Static, modal, RSA (expanding modal displacements to original nodes before CQC/SRSS/ABS combination), buckling, visualization helper, and `struct_core` adapter support; `structdyn` (`MDF`, `ResponseSpectrumAnalysis`) updated to use `expand_displacements`, `influence_vector`, `reduce_matrix`, and `reduce_vector`.
+- Closed-form eccentric diaphragm (Z, X, Y planes), multi-story kinematics/units/origin shift, beam axial force, elastic springs, truss nodes, buckling, sparse vs dense modal (`eigsh` vs `eigh`), Newmark time-history, and zero-diaphragm identity regression tests.
 
 ## M3. `struct_load` integration `[ ]`
 

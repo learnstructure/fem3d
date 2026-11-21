@@ -62,14 +62,17 @@ def buckling_analysis(structure, num_modes: int = 1) -> Tuple[np.ndarray, np.nda
     if structure.disp is None:
         structure.solve()
 
-    if structure.free_dofs is None:
+    if not structure.free_dofs and not structure.fixed_dofs and structure.nodes:
         structure.apply_boundary_conditions()
 
-    free = np.asarray(structure.free_dofs, dtype=np.int64)
-    K_ff = structure.K[free][:, free].toarray()
+    K_ff = structure.reduce_matrix(structure.K)
+    if hasattr(K_ff, "toarray"):
+        K_ff = K_ff.toarray()
 
     Kg = assemble_geometric_stiffness(structure)
-    Kg_ff = Kg[free][:, free].toarray()
+    Kg_ff = structure.reduce_matrix(Kg)
+    if hasattr(Kg_ff, "toarray"):
+        Kg_ff = Kg_ff.toarray()
 
     # Solve generalized eigenvalue problem: K_ff * phi = lambda * Kg_ff * phi
     # Alternatively: inv(K_ff) * Kg_ff * phi = (1/lambda) * phi
@@ -96,9 +99,8 @@ def buckling_analysis(structure, num_modes: int = 1) -> Tuple[np.ndarray, np.nda
     modes_to_return = min(num_modes, len(lambdas_sorted))
     buckling_factors = lambdas_sorted[:modes_to_return]
 
-    full_modes = np.zeros((structure.neq, modes_to_return), dtype=float)
+    full_modes = structure.expand_displacements(vecs_sorted[:, :modes_to_return])
     for m in range(modes_to_return):
-        full_modes[free, m] = vecs_sorted[:, m]
         max_v = np.max(np.abs(full_modes[:, m]))
         if max_v > 1e-12:
             full_modes[:, m] /= max_v

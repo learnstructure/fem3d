@@ -171,6 +171,9 @@ class Results:
         lines.append(f"Total DOFs: {self.structure.neq}")
         lines.append(f"Fixed DOFs ({len(self.structure.fixed_dofs)}): {self.structure.fixed_dofs}")
         lines.append(f"Free DOFs ({len(self.structure.free_dofs)}): {self.structure.free_dofs}")
+        if getattr(self.structure, "diaphragms", None):
+            lines.append(f"Rigid Diaphragms: {len(self.structure.diaphragms)}")
+            lines.append(f"Reduced DOFs: {self.structure.n_reduced_dofs}")
         lines.append("")
 
         lines.append("Node Support & Load Conditions")

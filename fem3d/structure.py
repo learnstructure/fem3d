@@ -7,6 +7,12 @@ import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import splu
 
+from .diaphragm import (
+    DIAPHRAGM_AXES,
+    RigidDiaphragm,
+    build_constraint_matrix,
+    validate_diaphragm_geometry,
+)
 from .nodes import Node
 from .elements.element import ElementBase
 from .elements.frame import FrameElement
@@ -65,6 +71,11 @@ class Structure:
         self.elements: Dict[Union[int, str], ElementBase] = {}
         self.shells: Dict[Union[int, str], ShellElement] = {}
         self._shell_batch: Optional[ShellBatch] = None
+        self.diaphragms: Dict[str, RigidDiaphragm] = {}
+        self._constraint_T: Optional[sp.csc_matrix] = None
+        self._constraint_has_mass: bool = False
+        self._independent_dofs: List[int] = []
+        self.diaphragm_masters: Dict[str, dict] = {}
         self.loads: List = []
         self.K: Optional[sp.csr_matrix] = None
         self.F: Optional[np.ndarray] = None
@@ -111,6 +122,40 @@ class Structure:
         """Add a load (PointLoad, DistributedLoad, etc.) to the structure."""
         self.loads.append(load)
 
+    def add_diaphragm(
+        self,
+        diaphragm_id: Union[str, RigidDiaphragm],
+        node_ids: Optional[Iterable[Union[int, str]]] = None,
+        axis: str = "Z",
+        name: Optional[str] = None,
+    ) -> RigidDiaphragm:
+        """Add a rigid planar diaphragm constraining ``node_ids`` perpendicular to ``axis``."""
+        if isinstance(diaphragm_id, RigidDiaphragm):
+            d = diaphragm_id
+        else:
+            if node_ids is None:
+                raise ValueError("node_ids is required when adding a diaphragm.")
+            d = RigidDiaphragm(id=diaphragm_id, node_ids=tuple(node_ids), axis=axis, name=name)
+
+        if d.id in self.diaphragms:
+            raise ValueError(f"Duplicate diaphragm ID {d.id!r}.")
+        validate_diaphragm_geometry(d, self.nodes)
+
+        used = {nid: existing.id for existing in self.diaphragms.values() for nid in existing.node_ids}
+        for nid in d.node_ids:
+            if nid in used:
+                raise ValueError(
+                    f"Node {nid!r} is already assigned to diaphragm {used[nid]!r}; "
+                    f"a node may belong to at most one diaphragm."
+                )
+
+        self.diaphragms[d.id] = d
+        self._constraint_T = None
+        self._constraint_has_mass = False
+        self._independent_dofs = []
+        self.diaphragm_masters = {}
+        return d
+
     def number_dofs(self):
         """
         Assign global DOF indices to each node.
@@ -122,6 +167,10 @@ class Structure:
             dof += 6
         self.neq = dof
         self._shell_batch = None  # shell DOF indices follow the numbering
+        self._constraint_T = None
+        self._constraint_has_mass = False
+        self._independent_dofs = []
+        self.diaphragm_masters = {}
 
     def _assemble_sparse(
         self,
@@ -240,6 +289,12 @@ class Structure:
         # Nodes of shell elements are never fixed automatically: a shell gives them rotational stiffness (or, for a
         # membrane or plate alone, leaves DOFs for the user to restrain, as SAP2000 does)
         shell_nodes = {id(n) for sh in self.shells.values() for n in sh.nodes}
+        diaph_constrained_dofs: Dict[int, set] = {}
+        for d in self.diaphragms.values():
+            local_dofs = set(DIAPHRAGM_AXES[d.axis]["dof_indices"])
+            for nid in d.node_ids:
+                if nid in self.nodes:
+                    diaph_constrained_dofs.setdefault(id(self.nodes[nid]), set()).update(local_dofs)
 
         # Elements connected to each node, in element order (one pass over the elements)
         connected_to: Dict[int, List[ElementBase]] = {}
@@ -262,15 +317,17 @@ class Structure:
             if has_frame:
                 continue
 
+            constrained = diaph_constrained_dofs.get(id(node), set())
+
             # Truss-only or spring-only node:
-            # Always constrain all 3 rotations.
-            node.support[3] = True
-            node.support[4] = True
-            node.support[5] = True
+            # Constrain rotations that are not coupled into a rigid diaphragm.
+            for r_idx in (3, 4, 5):
+                if r_idx not in constrained:
+                    node.support[r_idx] = True
 
             # Constrain translational DOFs that have zero diagonal stiffness
-            # from all connected elements (i.e. no bar provides stiffness in that direction).
-            # Accumulate diagonal stiffness contributions for global translations [ux, uy, uz].
+            # from all connected elements (i.e. no bar provides stiffness in that direction),
+            # excluding DOFs constrained by a rigid diaphragm.
             k_diag_trans = np.zeros(3, dtype=float)
             for el in connected:
                 kg = el.global_stiffness()          # 12x12
@@ -279,7 +336,7 @@ class Structure:
                     k_diag_trans[d] += kg[node_idx + d, node_idx + d]
 
             for d in range(3):
-                if k_diag_trans[d] < 1e-12:
+                if d not in constrained and k_diag_trans[d] < 1e-12:
                     node.support[d] = True
 
     def apply_boundary_conditions(self):
@@ -306,6 +363,124 @@ class Structure:
 
         self.fixed_dofs = fixed
         self.free_dofs = free
+        self._constraint_T = None
+        self._constraint_has_mass = False
+        self._independent_dofs = []
+        self.diaphragm_masters = {}
+        if self.diaphragms:
+            self.constraint_matrix(use_mass=False)
+
+    def constraint_matrix(self, use_mass: bool = False) -> sp.csc_matrix:
+        """
+        Return the sparse kinematic transformation matrix T (neq x n_reduced) mapping
+        reduced coordinates q to full nodal displacements u = T q.
+        """
+        if self.neq == 0 and self.nodes:
+            self.number_dofs()
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
+            self.apply_boundary_conditions()
+        if not self.diaphragms:
+            n_free = len(self.free_dofs)
+            return sp.csc_matrix(
+                (np.ones(n_free, dtype=float), (np.asarray(self.free_dofs, dtype=np.int64), np.arange(n_free, dtype=np.int64))),
+                shape=(self.neq, n_free),
+                dtype=float,
+            )
+        want_mass = bool(use_mass and self.M is not None)
+        if self._constraint_T is None or (want_mass and not self._constraint_has_mass):
+            T, indep, masters = build_constraint_matrix(
+                self.nodes,
+                self.free_dofs,
+                self.diaphragms.values(),
+                mass_matrix=self.M if want_mass else None,
+            )
+            self._constraint_T = T
+            self._constraint_has_mass = want_mass
+            self._independent_dofs = indep
+            self.diaphragm_masters = masters
+        return self._constraint_T
+
+    @property
+    def n_reduced_dofs(self) -> int:
+        """Number of independent + master DOFs in the reduced system."""
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
+            self.apply_boundary_conditions()
+        if not self.diaphragms:
+            return len(self.free_dofs)
+        return int(self.constraint_matrix(use_mass=self._constraint_has_mass).shape[1])
+
+    def reduce_matrix(self, mat):
+        """Transform a full (neq x neq) matrix into the reduced DOF space (T^T A T)."""
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
+            self.apply_boundary_conditions()
+        if not self.diaphragms:
+            free = np.asarray(self.free_dofs, dtype=np.int64)
+            return mat[free][:, free] if sp.issparse(mat) else np.asarray(mat, dtype=float)[np.ix_(free, free)]
+        T = self.constraint_matrix(use_mass=self._constraint_has_mass)
+        if sp.issparse(mat):
+            return (T.T @ mat @ T).tocsr()
+        arr = np.asarray(mat, dtype=float)
+        return np.asarray(T.T @ (T.T @ arr.T).T, dtype=float)
+
+    def reduce_vector(self, vec: np.ndarray) -> np.ndarray:
+        """Transform a full (neq,) generalized force vector into the reduced DOF space (T^T v)."""
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
+            self.apply_boundary_conditions()
+        arr = np.asarray(vec, dtype=float)
+        if not self.diaphragms:
+            return arr[self.free_dofs]
+        T = self.constraint_matrix(use_mass=self._constraint_has_mass)
+        return np.asarray(T.T @ arr, dtype=float)
+
+    def expand_displacements(self, u_reduced: np.ndarray) -> np.ndarray:
+        """Recover full nodal displacements (neq,) or (neq, k) from reduced coordinates (u = T q)."""
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
+            self.apply_boundary_conditions()
+        arr = np.asarray(u_reduced, dtype=float)
+        if arr.ndim not in (1, 2):
+            raise ValueError(f"Expected 1D or 2D reduced displacement array, got shape {arr.shape}.")
+        expected = self.n_reduced_dofs
+        if arr.shape[0] != expected:
+            raise ValueError(
+                f"Reduced displacement length ({arr.shape[0]}) does not match n_reduced_dofs ({expected})."
+            )
+        if not self.diaphragms:
+            shape = (self.neq,) if arr.ndim == 1 else (self.neq, arr.shape[1])
+            full = np.zeros(shape, dtype=float)
+            if expected > 0:
+                if arr.ndim == 1:
+                    full[self.free_dofs] = arr
+                else:
+                    full[self.free_dofs, :] = arr
+            return full
+        T = self.constraint_matrix(use_mass=self._constraint_has_mass)
+        return np.asarray(T @ arr, dtype=float)
+
+    def influence_vector(self, direction: str = "x") -> np.ndarray:
+        """Return the rigid-body ground-motion influence vector in the reduced DOF space."""
+        dir_key = str(direction).strip().lower()
+        target_map = {"x": 0, "0": 0, "y": 1, "1": 1, "z": 2, "2": 2}
+        if dir_key not in target_map:
+            raise ValueError(f"Unknown direction {direction!r}; expected 'x', 'y', or 'z'.")
+        target = target_map[dir_key]
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
+            self.apply_boundary_conditions()
+        if not self.diaphragms:
+            vec = np.zeros(len(self.free_dofs), dtype=float)
+            for i, dof in enumerate(self.free_dofs):
+                if dof % 6 == target:
+                    vec[i] = 1.0
+            return vec
+        T = self.constraint_matrix(use_mass=self._constraint_has_mass)
+        vec = np.zeros(T.shape[1], dtype=float)
+        for i, dof in enumerate(self._independent_dofs):
+            if dof % 6 == target:
+                vec[i] = 1.0
+        for meta in self.diaphragm_masters.values():
+            trans_map = meta["master_trans_dofs"]
+            if target in trans_map:
+                vec[trans_map[target]] = 1.0
+        return vec
 
     def solve(self):
         """
@@ -325,28 +500,48 @@ class Structure:
         self.assemble_loads()
         self.apply_boundary_conditions()
 
-        # Partition system: K_ff * u_f = F_f, solved by sparse LU (SuperLU)
         free = np.asarray(self.free_dofs, dtype=np.int64)
         fixed = np.asarray(self.fixed_dofs, dtype=np.int64)
-        F_f = self.F[free]
-
         self.disp = np.zeros(self.neq, dtype=float)
-        if len(free) > 0:
-            K_ff = self.K[free][:, free].tocsc()
-            try:
-                lu = splu(K_ff)
-            except RuntimeError as err:  # SuperLU: "Factor is exactly singular"
-                raise np.linalg.LinAlgError(
-                    f"Stiffness matrix is singular or ill-conditioned: {err}. "
-                    "Check for unconstrained DOFs or rigid body mechanisms."
-                ) from err
-            u_f = lu.solve(F_f)
-            if not np.all(np.isfinite(u_f)):
-                raise np.linalg.LinAlgError(
-                    "Stiffness matrix is singular or ill-conditioned: the solution is not finite. "
-                    "Check for unconstrained DOFs or rigid body mechanisms."
-                )
-            self.disp[free] = u_f
+
+        if not self.diaphragms:
+            # Partition system: K_ff * u_f = F_f, solved by sparse LU (SuperLU)
+            F_f = self.F[free]
+            if len(free) > 0:
+                K_ff = self.K[free][:, free].tocsc()
+                try:
+                    lu = splu(K_ff)
+                except RuntimeError as err:  # SuperLU: "Factor is exactly singular"
+                    raise np.linalg.LinAlgError(
+                        f"Stiffness matrix is singular or ill-conditioned: {err}. "
+                        "Check for unconstrained DOFs or rigid body mechanisms."
+                    ) from err
+                u_f = lu.solve(F_f)
+                if not np.all(np.isfinite(u_f)):
+                    raise np.linalg.LinAlgError(
+                        "Stiffness matrix is singular or ill-conditioned: the solution is not finite. "
+                        "Check for unconstrained DOFs or rigid body mechanisms."
+                    )
+                self.disp[free] = u_f
+        else:
+            T = self.constraint_matrix(use_mass=False)
+            if T.shape[1] > 0:
+                K_r = (T.T @ self.K @ T).tocsc()
+                F_r = np.asarray(T.T @ self.F, dtype=float)
+                try:
+                    lu = splu(K_r)
+                except RuntimeError as err:
+                    raise np.linalg.LinAlgError(
+                        f"Stiffness matrix is singular or ill-conditioned: {err}. "
+                        "Check for unconstrained DOFs or rigid body mechanisms."
+                    ) from err
+                q = lu.solve(F_r)
+                if not np.all(np.isfinite(q)):
+                    raise np.linalg.LinAlgError(
+                        "Stiffness matrix is singular or ill-conditioned: the solution is not finite. "
+                        "Check for unconstrained DOFs or rigid body mechanisms."
+                    )
+                self.disp = np.asarray(T @ q, dtype=float)
 
         # Compute support reactions at fixed DOFs:
         # R_c = K_cf * u_f + K_cc * u_c - F_c
@@ -407,6 +602,10 @@ class Structure:
                 if node.inertia[i] > 0.0:
                     nodal.append((node.dofs[3 + i], float(node.inertia[i])))
         self.M = self._assemble_sparse(blocks, nodal)
+        self._constraint_T = None
+        self._constraint_has_mass = False
+        self._independent_dofs = []
+        self.diaphragm_masters = {}
 
     def get_reduced_matrices(
         self,
@@ -414,9 +613,9 @@ class Structure:
         include_rotational_inertia: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Return (K_ff, M_ff) reduced to the free degrees of freedom, as sparse CSR matrices.
+        Return (K_r, M_r) reduced to active/master degrees of freedom, as sparse CSR matrices.
         """
-        if not self.free_dofs:
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
             self.apply_boundary_conditions()
         if self.K is None:
             self.assemble_stiffness()
@@ -430,10 +629,16 @@ class Structure:
         elif self.M is None:
             self.assemble_mass_matrix(lumped=False, include_rotational_inertia=include_rotational_inertia)
 
-        free = np.asarray(self.free_dofs, dtype=np.int64)
-        K_ff = self.K[free][:, free].tocsr()
-        M_ff = self.M[free][:, free].tocsr()
-        return K_ff, M_ff
+        if not self.diaphragms:
+            free = np.asarray(self.free_dofs, dtype=np.int64)
+            K_ff = self.K[free][:, free].tocsr()
+            M_ff = self.M[free][:, free].tocsr()
+            return K_ff, M_ff
+
+        T = self.constraint_matrix(use_mass=True)
+        K_r = (T.T @ self.K @ T).tocsr()
+        M_r = (T.T @ self.M @ T).tocsr()
+        return K_r, M_r
 
     def modal_analysis(
         self,
@@ -469,15 +674,15 @@ class Structure:
         if self.disp is None:
             self.solve()
 
-        n_free = len(self.free_dofs)
-        modes_to_calc = min(num_modes, n_free)
+        n_red = self.n_reduced_dofs
+        modes_to_calc = min(num_modes, n_red)
         if modes_to_calc <= 0:
             self.modal_results = {
                 "omega": np.array([], dtype=float),
                 "frequencies": np.array([], dtype=float),
                 "periods": np.array([], dtype=float),
                 "modes": np.zeros((self.neq, 0), dtype=float),
-                "phi": np.zeros((n_free, 0), dtype=float),
+                "phi": np.zeros((n_red, 0), dtype=float),
             }
             return self.modal_results
 
@@ -494,9 +699,8 @@ class Structure:
         periods[non_zero] = 1.0 / frequencies[non_zero]
 
         # Expand mode shapes to full DOF space (neq x modes)
-        full_modes = np.zeros((self.neq, len(omega)), dtype=float)
+        full_modes = self.expand_displacements(phi)
         for m_idx in range(len(omega)):
-            full_modes[self.free_dofs, m_idx] = phi[:, m_idx]
             max_val = np.max(np.abs(full_modes[:, m_idx]))
             if max_val > 1e-12:
                 full_modes[:, m_idx] /= max_val
@@ -519,7 +723,7 @@ class Structure:
         omega : numpy.ndarray
             Array of natural circular frequencies (rad/s), one per mode.
         phi : numpy.ndarray
-            Mode shape matrix of shape (n_free_dofs, n_modes) or (neq, n_modes).
+            Mode shape matrix of shape (n_reduced_dofs, n_modes) or (neq, n_modes).
         """
         omega_arr = np.asarray(omega, dtype=float)
         phi_arr = np.asarray(phi, dtype=float)
@@ -527,22 +731,20 @@ class Structure:
         non_zero = omega_arr > 1e-10
         periods[non_zero] = 2.0 * np.pi / omega_arr[non_zero]
 
-        if not self.free_dofs:
+        if not self.free_dofs and not self.fixed_dofs and self.nodes:
             self.apply_boundary_conditions()
+        n_red = self.n_reduced_dofs
 
         if phi_arr.ndim == 2:
-            num_modes = phi_arr.shape[1]
-            if phi_arr.shape[0] == len(self.free_dofs):
-                full_modes = np.zeros((self.neq, num_modes), dtype=float)
-                full_modes[self.free_dofs, :] = phi_arr
+            if phi_arr.shape[0] == n_red:
+                full_modes = self.expand_displacements(phi_arr)
             elif phi_arr.shape[0] == self.neq:
                 full_modes = phi_arr.copy()
             else:
                 full_modes = phi_arr
         elif phi_arr.ndim == 1:
-            if len(phi_arr) == len(self.free_dofs):
-                full_modes = np.zeros((self.neq, 1), dtype=float)
-                full_modes[self.free_dofs, 0] = phi_arr
+            if len(phi_arr) == n_red:
+                full_modes = self.expand_displacements(phi_arr).reshape(-1, 1)
             else:
                 full_modes = phi_arr.reshape(-1, 1)
         else:
@@ -676,9 +878,10 @@ class Structure:
         modal_u = rsa.modal_displacements()
         combined_u = rsa.combine_modal_responses(modal_u, method=combination)
 
-        d_comb = np.zeros(self.neq, dtype=float)
-        d_comb[self.free_dofs] = combined_u
-        self.disp = d_comb
+        # Expand each mode to original nodal DOFs before CQC/SRSS/ABS combination
+        full_modal_u = self.expand_displacements(modal_u)
+        full_combined_u = rsa.combine_modal_responses(full_modal_u, method=combination)
+        self.disp = full_combined_u
 
         elem_forces = rsa.compute_modal_element_forces(method=combination)
 
@@ -687,9 +890,7 @@ class Structure:
         combined_shells: Dict[Union[int, str], Dict[str, np.ndarray]] = {}
         batch = self.shell_batch()
         if batch is not None:
-            full = np.zeros((self.neq, modal_u.shape[1]), dtype=float)
-            full[self.free_dofs, :] = modal_u
-            per_mode = [batch.resultants(full[:, m]) for m in range(full.shape[1])]
+            per_mode = [batch.resultants(full_modal_u[:, m]) for m in range(full_modal_u.shape[1])]
             parts = {}
             for key, k in (("gauss_points", 0), ("corners", 1)):
                 stacked = np.stack([pm[k] for pm in per_mode], axis=-1)  # (N, 4, 8, modes)
@@ -715,6 +916,8 @@ class Structure:
             "mass_participation_ratio": rsa.mass_participation_ratio,
             "modal_displacements": modal_u,
             "combined_displacements": combined_u,
+            "full_modal_displacements": full_modal_u,
+            "full_combined_displacements": full_combined_u,
             "modal_element_forces": elem_forces["modal"],
             "combined_element_forces": elem_forces["combined"],
             "combined_shell_resultants": combined_shells,

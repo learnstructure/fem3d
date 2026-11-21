@@ -27,14 +27,19 @@ def prepare_mode_displacement(
     mode_vec = np.asarray(mode_vec, dtype=float).flatten()
 
     # Reconstruct full displacement vector
-    if len(mode_vec) == len(structure.free_dofs):
+    if len(mode_vec) == structure.neq:
+        disp_full = mode_vec.copy()
+    elif hasattr(structure, "expand_displacements") and len(mode_vec) == structure.n_reduced_dofs:
+        disp_full = structure.expand_displacements(mode_vec)
+    elif len(mode_vec) == len(structure.free_dofs):
         disp_full = np.zeros(structure.neq, dtype=float)
         disp_full[structure.free_dofs] = mode_vec
-    elif len(mode_vec) == structure.neq:
-        disp_full = mode_vec.copy()
     else:
+        n_expected = (
+            structure.n_reduced_dofs if hasattr(structure, "n_reduced_dofs") else len(structure.free_dofs)
+        )
         raise ValueError(
-            f"Mode vector length ({len(mode_vec)}) does not match free DOFs ({len(structure.free_dofs)}) or total DOFs ({structure.neq})."
+            f"Mode vector length ({len(mode_vec)}) does not match reduced DOFs ({n_expected}) or total DOFs ({structure.neq})."
         )
 
     # Calculate effective visual scale

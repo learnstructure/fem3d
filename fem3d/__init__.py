@@ -8,6 +8,7 @@ Author: Abinash Mandal
 """
 
 from .structure import Structure
+from .diaphragm import RigidDiaphragm
 from .nodes import Node
 from .materials.elastic import ElasticMaterial
 from .sections.section import Section
@@ -43,6 +44,7 @@ except ImportError:
 
 __all__ = [
     "Structure",
+    "RigidDiaphragm",
     "Node",
     "ElasticMaterial",
     "Section",
