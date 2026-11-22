@@ -37,15 +37,22 @@ Done: all items below. Test runs after final code edits: `fem3d` 202 passed, `st
 - Static, modal, RSA (expanding modal displacements to original nodes before CQC/SRSS/ABS combination), buckling, visualization helper, and `struct_core` adapter support; `structdyn` (`MDF`, `ResponseSpectrumAnalysis`) updated to use `expand_displacements`, `influence_vector`, `reduce_matrix`, and `reduce_vector`.
 - Closed-form eccentric diaphragm (Z, X, Y planes), multi-story kinematics/units/origin shift, beam axial force, elastic springs, truss nodes, buckling, sparse vs dense modal (`eigsh` vs `eigh`), Newmark time-history, and zero-diaphragm identity regression tests.
 
-## M3. `struct_load` integration `[ ]`
+## M3. `struct_load` integration `[x]` 21 November 2026
 
-- Mass source and seismic weight verified identical without diaphragms and consistent with diaphragms.
-- `apply_lateral_seismic` distributes story forces by nodal seismic weight on diaphragm floors (ASCE 7-22 §12.8.4.1) while keeping non-diaphragm behavior unchanged.
+Done: all items below. Test runs after final code edits: `struct_load` 85 passed, `fem3d` 202 passed, `structdyn` 111 passed, `struct_agent` 174 passed (572 passed total). New tests: `struct_load/tests/test_diaphragms.py`.
 
-## M4. `struct_link` exchange and RSA comparison `[ ]`
+- `calculate_mass_source` and `calculate_model_seismic_weight` keep identical values without or with diaphragms; added read-only `DiaphragmMassSummary` (`MassSourceResult.diaphragm_masses`) and `nodal_lumped_masses()` matching `fem3d`'s `T^T M T` master mass, center of mass, and rotational inertia across `Z`, `X`, and `Y` planes and `lateral_only=True`/`False`.
+- `LoadGenerator.apply_lateral_seismic` distributes ELF story forces in proportion to nodal seismic mass on rigid Z-diaphragm floors so the resultant acts at the floor center of mass (ASCE 7-22 §12.8.4.1), while floors without diaphragms keep the exact existing `face` / `uniform` distribution.
+- Verified with an asymmetric-mass floor (ELF resultant at COM, not centroid), static `fem3d` comparison against equivalent loads applied at the master COM node, and zero-diaphragm / mixed-floor regression tests.
 
-- ETABS `.e2k` and `EtabsLiveSession` read/write of rigid diaphragms; SAP2000 `.s2k` and `Sap2000LiveSession` read/write of diaphragm constraints; keep refusing semi-rigid diaphragms and non-diaphragm constraints under `allow_partial_import=False`.
-- Extend `pull_results` and `compare_results` to compare RSA cases in addition to static and modal cases.
+## M4. `struct_link` exchange and RSA comparison `[x]` 21 November 2026
+
+Done: all items below (offline tests and mocked COM sessions; live verification runs in M5). Test runs after final code edits: `struct_link` offline 119 passed (32 live deselected), `struct_core` 193 passed, `fem3d` 202 passed, `structdyn` 111 passed, `struct_load` 86 passed, `struct_agent/tests/test_link_tools.py` 21 passed (732 passed total). New/updated tests: `struct_link/tests/test_diaphragms.py`, `struct_link/tests/test_diaphragm_refusal.py`, `struct_link/tests/test_etabs_e2k_fidelity.py`, `struct_link/tests/test_sap2000_roundtrip.py` (`diff_models`).
+
+- Capabilities & writers: removed temporary `refuse_diaphragms`, added case-insensitive diaphragm ID collision check; ETABS `.e2k` and `EtabsLiveSession` write rigid Z diaphragms (`$ DIAPHRAGM NAMES`, `DIAPH`, `Diaphragm.SetDiaphragm`, `PointObj.SetDiaphragm`), refusing non-Z or reserved `"None"`; SAP2000 `.s2k` and `Sap2000LiveSession` write rigid `Z`/`X`/`Y` diaphragms (`CONSTRAINT DEFINITIONS - DIAPHRAGM`, `JOINT CONSTRAINT ASSIGNMENTS`, `ConstraintDef.SetDiaphragm`, `PointObj.SetConstraint`), refusing 2D models and semi-rigid diaphragms.
+- Readers: ETABS `.e2k` (`$ DIAPHRAGM NAMES`, story/point `DIAPH` with explicit `DIAPH "None"` override) and SAP2000 `.s2k` / live tables (`Axis=Auto`, `MultiLevel=Yes`, coplanarity checks) materialize coplanar rigid `Diaphragm` objects, split multi-story/multi-level shared names per plane, and continue refusing semi-rigid, area-assigned, non-`GLOBAL`, non-coplanar, overlapping, and non-diaphragm constraints under `allow_partial_import=False`.
+- RSA pulling & `compare.py`: `Sap2000LiveSession` and `EtabsLiveSession` push zero eccentricity and pull `_CASE_RESPONSE_SPECTRUM` as unsigned `AnalysisResult(result_type="rsa")` envelopes; `_estimate_stiffness_condition_number` uses `reduce_matrix`, `_solve_modal_case` uses `influence_vector`, and `_solve_rsa_case` / `_compare_rsa_case` combine modal frame forces at each station and compare unsigned envelopes at first-principles RSA tolerances (`1e-7` Timoshenko, `1e-6` Euler-Bernoulli).
+- Pre-M4 fixes also completed: unified `LoadGenerator.calculate_model_seismic_weight()` and `apply_lateral_seismic()` with `MS_ASCE7` (`test_benchmark_suite.py`: 261 passed, 2 skipped, zero reference shifts) and added `ROADMAP.md` §4 P2 lateral-only mass source item.
 
 ## M5. Live verification against ETABS 23 and SAP2000 27 `[ ]`
 
@@ -56,6 +63,7 @@ Done: all items below. Test runs after final code edits: `fem3d` 202 passed, `st
 ## M6. `struct_agent` tools and ASCE 7-22 §12.3.1.2 eligibility `[ ]`
 
 - Deterministic ASCE 7-22 §12.3.1.2 checker integrated into `create_frame_model`, `create_model_from_plan_draft`, `create_project`, `inspect_project`, and analysis tools (`run_analysis`, `run_response_spectrum`, `run_time_history`, `verify_with_csi`).
+- Test a model with diaphragms through every agent analysis tool (`run_analysis`, `run_response_spectrum`, `run_time_history`, `verify_with_csi`, and the story-shear and reaction helpers) so none still indexes `free_dofs` directly.
 - Log tool and schema changes in `research_paper/experiment_run.md`.
 
 ## M7. Documentation, examples, and full suite regression `[ ]`
