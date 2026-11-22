@@ -508,3 +508,84 @@ def test_adapter_roundtrip_and_zero_diaphragm_identity():
     assert rsa_nd["combined_displacements"].shape == (len(free),)
     np.testing.assert_array_equal(s_no_d.expand_displacements(disp_nd[free]), disp_nd)
     assert np.sum(np.abs(reac_nd)) > 0.0
+
+
+def test_standalone_diaphragm_node_static_modal_rsa_and_zero_reactions():
+    """Standalone diaphragm joint (no connected elements) stays coupled in-plane, has zero reaction, and adds inertia."""
+    s_base = Structure(units="kN, m")
+    s_with_cm = Structure(units="kN, m")
+
+    def _build_frame(struct: Structure, include_cm: bool) -> dict:
+        mat = ElasticMaterial(E=25.0e6, nu=0.2, rho=0.0)
+        col_sec = Section.from_rectangle(0.4, 0.4, mat)
+        bm_sec = Section.from_rectangle(0.3, 0.5, mat)
+        coords = [(0.0, 0.0), (6.0, 0.0), (6.0, 5.0), (0.0, 5.0)]
+        base_nodes = [Node(i + 1, x, y, 0.0) for i, (x, y) in enumerate(coords)]
+        top_nodes = [Node(i + 5, x, y, 3.5) for i, (x, y) in enumerate(coords)]
+        for bn in base_nodes:
+            bn.set_support(True, True, True, True, True, True)
+            struct.add_node(bn)
+        for tn in top_nodes:
+            tn.mass = [15.0, 15.0, 0.0]
+            struct.add_node(tn)
+        for i in range(4):
+            struct.add_element(FrameElement(f"C{i+1}", base_nodes[i], top_nodes[i], mat, col_sec))
+        for i, (a, b) in enumerate(((0, 1), (3, 2), (0, 3), (1, 2)), start=1):
+            struct.add_element(FrameElement(f"B{i}", top_nodes[a], top_nodes[b], mat, bm_sec))
+
+        d_ids = [tn.id for tn in top_nodes]
+        cm_node = None
+        if include_cm:
+            cm_node = Node(99, 3.0, 2.5, 3.5)
+            cm_node.mass = [10.0, 10.0, 0.0]
+            cm_node.inertia = [0.0, 0.0, 120.0]
+            struct.add_node(cm_node)
+            d_ids.append(99)
+        struct.add_diaphragm("D1", d_ids, axis="Z")
+        return {"top": top_nodes, "cm": cm_node, "base": base_nodes}
+
+    info_ref = _build_frame(s_base, include_cm=False)
+    info_cm = _build_frame(s_with_cm, include_cm=True)
+
+    # Apply the rigid-body equivalent of CM load (fx=80, fy=30, mz=50 at (3.0, 2.5)) to an on-diaphragm frame node in s_base:
+    # At corner node 5 (0, 0), r_5 - r_cm = (-3, -2.5), so (r x F)_z = (-3)*30 - (-2.5)*80 = +110 -> mz_at_5 = 50 - 110 = -60
+    s_base.add_load(PointLoad(info_ref["top"][0], fx=80.0, fy=30.0, mz=-60.0))
+    # Apply load directly to standalone CM joint (plus vertical fz=-25 to ensure no user reaction is reported even if loaded)
+    s_with_cm.add_load(PointLoad(info_cm["cm"], fx=80.0, fy=30.0, fz=-25.0, mz=50.0))
+
+    disp_ref, _ = s_base.solve()
+    disp_cm, reac_cm = s_with_cm.solve()
+
+    # In-plane frame displacements must match between CM load and statically equivalent diaphragm load
+    for n_ref, n_cm in zip(info_ref["top"], info_cm["top"]):
+        np.testing.assert_allclose(disp_cm[n_cm.dofs], disp_ref[n_ref.dofs], rtol=1e-12, atol=1e-12)
+
+    # Standalone CM joint stays coupled to diaphragm, has zero out-of-plane DOFs, is unsupported, and has zero reaction
+    cm = info_cm["cm"]
+    u_cm = disp_cm[cm.dofs]
+    u_5 = disp_cm[info_cm["top"][0].dofs]
+    assert u_cm[0] == pytest.approx(u_5[0] - (cm.y - info_cm["top"][0].y) * u_5[5], rel=1e-12, abs=1e-12)
+    assert u_cm[1] == pytest.approx(u_5[1] + (cm.x - info_cm["top"][0].x) * u_5[5], rel=1e-12, abs=1e-12)
+    assert u_cm[5] == pytest.approx(u_5[5], rel=1e-12, abs=1e-12)
+    assert abs(u_cm[2]) == 0.0 and abs(u_cm[3]) == 0.0 and abs(u_cm[4]) == 0.0
+    assert cm.is_supported() is False
+    np.testing.assert_array_equal(reac_cm[cm.dofs], np.zeros(6))
+
+    # Static result_to_core omits reaction on standalone CM joint
+    res_core = result_to_core(s_with_cm)
+    assert res_core.node_results[99].displacement.ux == pytest.approx(u_cm[0], rel=1e-12)
+
+    # Modal & RSA run cleanly with CM mass and rotational inertia I_z included in T^T M T (no zero-freq modes)
+    modal_cm = s_with_cm.modal_analysis(num_modes=3, lumped=True)
+    assert all(p > 0.0 and np.isfinite(p) for p in modal_cm["periods"])
+    _, M_r = s_with_cm.get_reduced_matrices(lumped=True)
+    d_meta = s_with_cm.diaphragm_masters["D1"]
+    d_u1, _, d_r3 = d_meta["master_dofs"]
+    sr = d_meta["scale_radius"]
+    assert M_r[d_u1, d_u1] == pytest.approx(4 * 15.0 + 10.0, rel=1e-12)
+    expected_iz = 120.0 + sum(15.0 * ((n.x - 3.0) ** 2 + (n.y - 2.5) ** 2) for n in info_cm["top"])
+    assert M_r[d_r3, d_r3] * (sr ** 2) == pytest.approx(expected_iz, rel=1e-12)
+    rsa_cm = s_with_cm.response_spectrum_analysis(Sa=[1.0, 1.0, 1.0], n_modes=3, direction="x", scale_factor=9.80665)
+    u_cm_rsa = rsa_cm["full_combined_displacements"][cm.dofs]
+    assert abs(u_cm_rsa[0]) > 1e-6
+    assert abs(u_cm_rsa[2]) == 0.0

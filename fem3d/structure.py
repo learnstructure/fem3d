@@ -86,6 +86,8 @@ class Structure:
         self.neq: int = 0
         self.fixed_dofs: List[int] = []
         self.free_dofs: List[int] = []
+        self._auto_fixed_dofs: set[int] = set()
+        self._user_fixed_dofs: List[int] = []
 
     def add_node(self, node: Node):
         """Add a Node to the structure."""
@@ -273,18 +275,20 @@ class Structure:
 
     def _auto_fix_unstable_dofs(self):
         """
-        Automatically constrain inactive degrees of freedom at nodes that
-        connected only to truss or spring elements (no frame/beam elements).
-
-        A 3D truss element provides stiffness only along its axial direction.
-        Therefore, at a truss-only node:
-          - All 3 rotational DOFs [rx, ry, rz] are zero-stiffness -> constrain.
-          - Each translational DOF that has zero accumulated diagonal stiffness
-            from all connected elements is also zero-stiffness -> constrain.
-        This prevents singular K_ff without modifying user-specified supports.
+        Identify inactive degrees of freedom that must be zeroed to prevent a
+        singular stiffness matrix, without mutating ``node.support`` or
+        generating artificial reactions:
+        - Standalone nodes in a rigid diaphragm (no connected elements): fix all
+          out-of-plane DOFs (those not coupled by the diaphragm) unless already
+          supported or given a positive spring stiffness.
+        - Nodes connected only to truss or spring elements (no frame/beam
+          elements): fix rotational DOFs and zero-diagonal translational DOFs
+          not coupled into a rigid diaphragm.
         """
         if self.neq == 0:
             self.number_dofs()
+
+        self._auto_fixed_dofs = set()
 
         # Nodes of shell elements are never fixed automatically: a shell gives them rotational stiffness (or, for a
         # membrane or plate alone, leaves DOFs for the user to restrain, as SAP2000 does)
@@ -304,8 +308,21 @@ class Structure:
                 connected_to.setdefault(id(el.node_j), []).append(el)
 
         for node in self.nodes.values():
+            if id(node) in shell_nodes:
+                continue
+
             connected = connected_to.get(id(node), [])
-            if not connected or id(node) in shell_nodes:
+            constrained = diaph_constrained_dofs.get(id(node), set())
+            springs = getattr(node, "springs", None) or [0.0] * 6
+
+            if not connected:
+                # Standalone diaphragm node (e.g. CM joint): keep in-plane DOFs with the diaphragm,
+                # fix unsupported zero-stiffness out-of-plane DOFs via _auto_fixed_dofs only.
+                if not constrained:
+                    continue
+                for d in range(6):
+                    if d not in constrained and not node.support[d] and float(springs[d]) <= 0.0:
+                        self._auto_fixed_dofs.add(node.dofs[d])
                 continue
 
             has_frame = any(
@@ -317,12 +334,10 @@ class Structure:
             if has_frame:
                 continue
 
-            constrained = diaph_constrained_dofs.get(id(node), set())
-
             # Truss-only or spring-only node:
-            # Constrain rotations that are not coupled into a rigid diaphragm.
+            # Constrain rotations that are not coupled into a rigid diaphragm (unless supported/sprung).
             for r_idx in (3, 4, 5):
-                if r_idx not in constrained:
+                if r_idx not in constrained and not node.support[r_idx] and float(springs[r_idx]) <= 0.0:
                     node.support[r_idx] = True
 
             # Constrain translational DOFs that have zero diagonal stiffness
@@ -336,7 +351,12 @@ class Structure:
                     k_diag_trans[d] += kg[node_idx + d, node_idx + d]
 
             for d in range(3):
-                if d not in constrained and k_diag_trans[d] < 1e-12:
+                if (
+                    d not in constrained
+                    and k_diag_trans[d] < 1e-12
+                    and not node.support[d]
+                    and float(springs[d]) <= 0.0
+                ):
                     node.support[d] = True
 
     def apply_boundary_conditions(self):
@@ -346,6 +366,7 @@ class Structure:
         self._auto_fix_unstable_dofs()
 
         fixed = []
+        user_fixed = []
         free = []
         for node in self.nodes.values():
             for i, fixed_flag in enumerate(node.support):
@@ -358,10 +379,14 @@ class Structure:
                     )
                 if fixed_flag:
                     fixed.append(dof_idx)
+                    user_fixed.append(dof_idx)
+                elif dof_idx in self._auto_fixed_dofs:
+                    fixed.append(dof_idx)
                 else:
                     free.append(dof_idx)
 
         self.fixed_dofs = fixed
+        self._user_fixed_dofs = user_fixed
         self.free_dofs = free
         self._constraint_T = None
         self._constraint_has_mass = False
@@ -543,17 +568,18 @@ class Structure:
                     )
                 self.disp = np.asarray(T @ q, dtype=float)
 
-        # Compute support reactions at fixed DOFs:
+        # Compute support reactions at user-supported DOFs only (never on auto-fixed unstable DOFs):
         # R_c = K_cf * u_f + K_cc * u_c - F_c
         self.reactions = np.zeros(self.neq, dtype=float)
-        if len(fixed):
+        user_fixed = np.asarray(self._user_fixed_dofs, dtype=np.int64)
+        if len(user_fixed):
             if len(free) > 0:
-                self.reactions[fixed] = (
-                    self.K[fixed][:, free] @ self.disp[free]
-                    - self.F[fixed]
+                self.reactions[user_fixed] = (
+                    self.K[user_fixed][:, free] @ self.disp[free]
+                    - self.F[user_fixed]
                 )
             else:
-                self.reactions[self.fixed_dofs] = -self.F[self.fixed_dofs]
+                self.reactions[user_fixed] = -self.F[user_fixed]
 
         # Add spring reactions (-k * u) at spring-supported DOFs
         for node in self.nodes.values():
