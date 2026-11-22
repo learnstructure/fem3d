@@ -35,6 +35,7 @@
 - **3D Space Truss Element** — Pin-jointed bar members. Axial stiffness only.
 - **3D Spring Element** — Translational and rotational springs along 3D axes.
 - **4-Node Flat Shell Element** — Membrane with drilling rotations plus MITC4 plate bending (thick plates, no shear locking), six DOFs per node; local axes, stress resultants, and signs as in SAP2000 (CSI §10). Uniform loads, self-weight, lumped or consistent mass, results at Gauss points, corners, and nodes.
+- **Rigid Floor Diaphragms** — Exact kinematic constraint (`u = T q`, `K_r = T^T K T`, `M_r = T^T M T`, `F_r = T^T F`, internal RMS-radius scaling `L_d`) in `Z`, `X`, or `Y` planes across static, modal, response spectrum, buckling, and `struct_core` adapter workflows, keeping out-of-plane DOFs free.
 - **Arbitrary 3D Member Orientation** — Automatic local axes computation from member geometry. Supports user-specified roll angle $\beta$ (degrees) or web reference vector.
 - **End Releases** — Optional moment/torsion/shear releases at either end of a frame element (e.g. pinned connections).
 - **Nodal & Element Loads** — Concentrated 3D nodal loads; uniform and partial distributed loads on elements with exact fixed-end force/moment calculation; element point loads.
@@ -855,7 +856,8 @@ The stiffness matrices, mass matrices, and transformation procedures in `fem3d` 
 | **Dvorkin, E. N. & Bathe, K. J.** (1984). *A continuum mechanics based four-node shell element for general non-linear analysis*. Eng. Comput. 1(1), 77–88. | MITC4 assumed transverse shear strain |
 | **Ibrahimbegovic, A., Taylor, R. L., & Wilson, E. L.** (1990). *A robust quadrilateral membrane finite element with drilling degrees of freedom*. Int. J. Numer. Meth. Eng. 30, 445–457. | Drilling-rotation membrane element |
 | **Ibrahimbegovic, A. & Frey, F.** (1992). *Stress resultant geometrically nonlinear shell theory with drilling rotations*. Int. J. Numer. Meth. Eng. 35, 113–146. | Tangential incompatible modes for pure bending |
-| **Wilson, E. L.** (2002). *Three-Dimensional Static and Dynamic Analysis of Structures*. Ch. 9–10. | Membrane drilling formulation, warped shell rigid links |
+| **Wilson, E. L.** (2002). *Three-Dimensional Static and Dynamic Analysis of Structures*. Ch. 7 §7.5; Ch. 9–10. | Rigid floor diaphragm transformation (`u = T q`), membrane drilling formulation, warped shell rigid links |
+| **Computers and Structures, Inc.** *CSI Analysis Reference Manual*. Ch. 5 §§5.3–5.4, §5.12–5.13. | Diaphragm constraints, master-point COM, and rotational inertia |
 
 > **Note:** Items marked `# TODO: verify` in the source code or test files have computed values that need manual cross-check against your textbook, particularly for biaxial bending sign conventions (the $\theta_y$ sign) and moment reaction directions.
 
@@ -922,6 +924,7 @@ analysis_result = result_to_core(structure, analysis_case_id="Static_3D")
 The `examples/` directory contains complete, verified runnable scripts:
 
 ### Linear Static & Code Procedures (`examples/linear/`)
+- `rigid_diaphragm_frame.py`: Minimal 2-story 3D RC space frame with rigid floor diaphragms, asymmetric lumped mass, mass-weighted ASCE 7-22 ELF forces, modal analysis, and RSA.
 - `shell_plate.py`: Simply supported square slab modeled with four-node `ShellElement`s and `ShellLoad`, compared against the Kirchhoff plate solution (Timoshenko Table 8).
 - `rc_frame_model.py`: Reusable canonical 2-story 3D RC Space Frame model constructor (`create_rc_frame` and `create_rc_frame_core`).
 - `frame_elf.py`: ASCE 7-16 / 7-22 Section 12.8 Equivalent Lateral Force (ELF) seismic analysis using `struct_core`, `struct_load.LoadGenerator.apply_lateral_seismic`, and `fem3d.adapters.model_from_core` with Mass Source multipliers (1.0 SuperDead + 0.25 LIVE), base shear $V$, base reactions, and upper story displacements.

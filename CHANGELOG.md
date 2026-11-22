@@ -12,6 +12,16 @@ All notable changes to `fem3d` are recorded in this file. The format follows
   (`node13_ux_mm` `8.9326 -> 8.7545 mm`) after unifying restrained-base mass exclusion in `struct_load`.
 
 ### Added
+- **Rigid floor diaphragms (`fem3d/DIAPHRAGM_PLAN.md`, M2, M5 & M7):** exact sparse kinematic transformation
+  (`u = T q`, `K_r = T^T K T`, `M_r = T^T M T`, `F_r = T^T F`, internal RMS-radius scaling `L_d`) on `Structure`
+  (`add_diaphragm`, `constraint_matrix`, `expand_displacements`, `influence_vector`, `reduce_matrix`, `reduce_vector`,
+  `get_reduced_matrices`, `diaphragm_masters`) across `Z`, `X`, and `Y` planes, placing the master at the floor
+  center of mass (centroid when massless) so rotational inertia follows from `T^T M T`. Supported across linear
+  static, modal, RSA (expanding modal vectors to original nodes before CQC/SRSS/ABS combination), linear elastic
+  buckling, visualization, and `model_from_core` / `model_to_core` / `result_to_core`. `_auto_fix_unstable_dofs` leaves
+  in-plane diaphragm DOFs coupled on standalone diaphragm joints and restrains only unsupported zero-stiffness
+  out-of-plane DOFs without reporting artificial reactions. Example: `examples/linear/rigid_diaphragm_frame.py`.
+  Tests: `tests/test_diaphragms.py`, `tests/test_diaphragm_refusal.py`.
 - `tests/test_shell_structure.py`: invariance of a warped mesh (twisted beam 12x2) under cyclic renumbering of
   every element: the stiffness is the same to round-off, and the corner resultants agree after rotation into a
   common direction, although the in-plane axes turn (SAP2000's rule for warped elements). README and
